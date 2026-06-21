@@ -1,26 +1,47 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1"
+import { hmac } from "https://deno.land/x/hmac@v2.0.1/mod.ts"
 
 serve(async (req) => {
   try {
-    // 1. Recibir la "carta" de Mercado Pago
-    const body = await req.json()
+    const body = await req.text()
+    
+    // Verificación de firma HMAC de Mercado Pago
+    const secret = Deno.env.get('MP_WEBHOOK_SECRET')
+    if (secret) {
+      const xSignature = req.headers.get('x-signature') ?? ''
+      const xRequestId = req.headers.get('x-request-id') ?? ''
+      const url = new URL(req.url)
+      const dataId = url.searchParams.get('data.id') ?? ''
 
-    // Solo nos interesan las notificaciones de pagos reales
-    if (body.type === 'payment' || body.topic === 'payment') {
-      const paymentId = body.data.id
-      const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
+      // Construir el manifest según documentación de MP
+      const manifest = `id:${dataId};request-id:${xRequestId};ts:${xSignature.split(',').find(p => p.startsWith('ts='))?.split('=')[1] ?? ''};`
+      const ts = xSignature.split(',').find(p => p.startsWith('ts='))?.split('=')[1] ?? ''
+      const v1 = xSignature.split(',').find(p => p.startsWith('v1='))?.split('=')[1] ?? ''
+      const generatedHash = await hmac('sha256', secret, `id:${dataId};request-id:${xRequestId};ts:${ts};`, 'utf8', 'hex')
 
-      // 2. Preguntarle a Mercado Pago los detalles de este pago por seguridad
+      if (generatedHash !== v1) {
+        console.error('Firma HMAC inválida — posible request falso')
+        return new Response('Unauthorized', { status: 401 })
+      }
+    }
+
+    const payload = JSON.parse(body)
+    const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
+
+    if (payload.type === 'payment' || payload.topic === 'payment') {
+      const paymentId = payload.data?.id
+
+      // Verificar el pago directamente con MP por seguridad
       const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: { 'Authorization': `Bearer ${mpAccessToken}` }
       })
       const paymentData = await mpResponse.json()
 
-      // 3. Si el pago fue aprobado, buscamos de quién era
       if (paymentData.status === 'approved') {
-        // Obtenemos el ID de la preferencia que generamos en la app
-        const preferenceId = paymentData.order?.preference_id || paymentData.metadata?.preference_id
+        const preferenceId = paymentData.order?.preference_id
+        const metaUsuarioId = paymentData.metadata?.usuario_id
+        const metaJornada = paymentData.metadata?.jornada
 
         if (preferenceId) {
           const supabaseClient = createClient(
@@ -28,19 +49,19 @@ serve(async (req) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
           )
 
-          // 4. ¡Magia! Actualizamos al usuario a "pagado"
           await supabaseClient
-            .from('usuarios_quiniela')
+            .from('quinielas')
             .update({ estado_pago: 'pagado' })
             .eq('mp_preference_id', preferenceId)
+
+          console.log(`✅ Pago aprobado — usuario: ${metaUsuarioId}, jornada: ${metaJornada}`)
         }
       }
     }
 
-    // Mercado Pago exige que le respondamos un "Recibido" (Status 200) rápido
-    return new Response("OK", { status: 200 })
-
+    return new Response('OK', { status: 200 })
   } catch (error) {
-    return new Response("Error procesando webhook", { status: 400 })
+    console.error('Webhook error:', error)
+    return new Response('Error', { status: 400 })
   }
 })

@@ -10,10 +10,25 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { nombre, telefono } = await req.json()
-    const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
+    // Verificar JWT del usuario autenticado
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) throw new Error('No autorizado')
 
-    // 1. Pedir link a Mercado Pago
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Obtener usuario desde el JWT
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token)
+    if (authError || !user) throw new Error('Token inválido')
+
+    const { nombre, usuario_id, jornada } = await req.json()
+    const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://quinielapro.app'
+
+    // Crear preferencia en Mercado Pago
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
       headers: {
@@ -21,34 +36,34 @@ serve(async (req) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-  items: [{ title: 'Entrada Quiniela', quantity: 1, currency_id: 'MXN', unit_price: 100.00 }],
-  payer: { name: nombre },
-  back_urls: {
-    success: "https://www.google.com",
-    failure: "https://www.google.com",
-    pending: "https://www.google.com"
-  },
-  auto_return: "approved"
-})
+        items: [{ title: `Quiniela Pro — Jornada ${jornada}`, quantity: 1, currency_id: 'MXN', unit_price: 100.00 }],
+        payer: { name: nombre, email: user.email },
+        back_urls: {
+          success: `${appUrl}/pago/exito`,
+          failure: `${appUrl}/pago/error`,
+          pending: `${appUrl}/pago/error`,
+        },
+        auto_return: 'approved',
+        metadata: { usuario_id, jornada },
+        notification_url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/webhook-mp`,
+      })
     })
 
     const mpData = await mpResponse.json()
-    if (!mpData.id) throw new Error("MP Error: " + JSON.stringify(mpData))
+    if (!mpData.id) throw new Error('MP Error: ' + JSON.stringify(mpData))
 
-    // 2. Conectar a base de datos Supabase
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    // Crear o actualizar registro en quinielas
+    await supabaseClient.from('quinielas').upsert([
+      {
+        usuario_id,
+        jornada,
+        mp_preference_id: mpData.id,
+        estado_pago: 'pendiente',
+      }
+    ], { onConflict: 'usuario_id,jornada' })
 
-    // 3. Guardar usuario
-    await supabaseClient.from('usuarios_quiniela').insert([
-      { nombre, telefono, mp_preference_id: mpData.id, estado_pago: 'pendiente' }
-    ])
-
-    // 4. Regresar el link a tu app
-    return new Response(JSON.stringify({ urlPago: mpData.init_point }), { 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    return new Response(JSON.stringify({ urlPago: mpData.init_point }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
   } catch (error: any) {
