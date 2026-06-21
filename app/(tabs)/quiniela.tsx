@@ -1,34 +1,35 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, ActivityIndicator, Linking, RefreshControl, StatusBar,
+  Alert, ActivityIndicator, RefreshControl, StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
 const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b' };
 
-type Partido  = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean; resultado_final:string|null };
-type Jornada  = { id:string; nombre:string; estado:string };
-type QuinielaDB = { id:string; estado_pago:string; jornada_id:string; codigo:string };
+type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
+type Jornada    = { id:string; nombre:string; estado:string };
+type QuinielaDB = { id:string; estado_pago:string; jornada_id:string; codigo:string; aciertos:number };
 
 export default function QuinielaScreen() {
   const { user } = useAuth();
-  const insets = useSafeAreaInsets();
-  const [jornada, setJornada]     = useState<Jornada|null>(null);
-  const [partidos, setPartidos]   = useState<Partido[]>([]);
+  const insets   = useSafeAreaInsets();
+  const router   = useRouter();
+
+  const [jornada, setJornada]           = useState<Jornada|null>(null);
+  const [partidos, setPartidos]         = useState<Partido[]>([]);
   const [predicciones, setPredicciones] = useState<Record<string,'1'|'X'|'2'>>({});
-  const [quiniela, setQuiniela]   = useState<QuinielaDB|null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [guardando, setGuardando] = useState(false);
+  const [quiniela, setQuiniela]         = useState<QuinielaDB|null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
 
   const cargar = useCallback(async () => {
     if (!user) return;
 
-    // 1. Jornada abierta activa
     const { data: jData } = await supabase
       .from('jornadas')
       .select('id,nombre,estado')
@@ -37,31 +38,24 @@ export default function QuinielaScreen() {
       .limit(1)
       .maybeSingle();
 
-    if (!jData) { setJornada(null); setPartidos([]); setQuiniela(null); setLoading(false); return; }
+    if (!jData) { setJornada(null); setPartidos([]); setQuiniela(null); return; }
     setJornada(jData);
 
-    // 2. Partidos de esa jornada
     const { data: pData } = await supabase
-      .from('partidos')
-      .select('*')
-      .eq('jornada_id', jData.id)
-      .order('fecha');
+      .from('partidos').select('*').eq('jornada_id', jData.id).order('fecha');
     setPartidos(pData || []);
 
-    // 3. Quiniela del usuario para esta jornada
     const { data: qData } = await supabase
       .from('quinielas')
-      .select('id,estado_pago,jornada_id,codigo')
+      .select('id,estado_pago,jornada_id,codigo,aciertos')
       .eq('usuario_id', user.id)
       .eq('jornada_id', jData.id)
       .maybeSingle();
     setQuiniela(qData);
 
-    // 4. Sus predicciones
     if (qData && pData) {
       const { data: predData } = await supabase
-        .from('predicciones')
-        .select('partido_id,resultado')
+        .from('predicciones').select('partido_id,resultado')
         .eq('usuario_id', user.id)
         .in('partido_id', pData.map(p => p.id));
       const map: Record<string,'1'|'X'|'2'> = {};
@@ -80,45 +74,33 @@ export default function QuinielaScreen() {
     setPredicciones(p => ({ ...p, [id]: r }));
   };
 
-  // Genera codigo tipo QUI-XXXX
-  const generarCodigo = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = 'QUI-';
-    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-  };
-
-  const guardarQuiniela = async () => {
+  // Ir a pagar — las predicciones viajan como params, Supabase NO se toca aqui
+  const irAPagar = () => {
     if (!user || !jornada) return;
     if (Object.keys(predicciones).length < partidos.length) {
       Alert.alert('Incompleto', 'Selecciona un resultado para cada partido.');
       return;
     }
-    setGuardando(true);
-    const codigo = generarCodigo();
-    const { data: nQ, error: eQ } = await supabase
-      .from('quinielas')
-      .insert({ usuario_id: user.id, jornada_id: jornada.id, jornada: 0, estado_pago: 'pendiente', aciertos: 0, codigo })
-      .select().single();
-    if (eQ || !nQ) { Alert.alert('Error', eQ?.message || 'Error'); setGuardando(false); return; }
-    const inserts = Object.entries(predicciones).map(([partido_id, resultado]) => ({
-      usuario_id: user.id, partido_id, resultado, quiniela_id: nQ.id,
-    }));
-    const { error: eP } = await supabase.from('predicciones').insert(inserts);
-    if (eP) { Alert.alert('Error', eP.message); setGuardando(false); return; }
-    await cargar();
-    setGuardando(false);
-    Alert.alert('✅ Quiniela guardada', `Tu código es: ${codigo}\n\nGuárdalo y envíalo con tu pago.`);
+    // Serializar predicciones como JSON para pasarlas como param
+    router.push({
+      pathname: '/pago/checkout',
+      params: {
+        jornada_id:  jornada.id,
+        jornada_nombre: jornada.nombre,
+        predicciones: JSON.stringify(predicciones),
+      },
+    });
   };
 
-  const formatFecha = (f: string) => new Date(f).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+  const formatFecha = (f: string) =>
+    new Date(f).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
 
-  const yaGuardo  = !!quiniela;
-  const esPagado  = quiniela?.estado_pago === 'pagado';
-  const todoSel   = partidos.length > 0 && Object.keys(predicciones).length === partidos.length;
-  const selCount  = Object.keys(predicciones).length;
+  const yaGuardo = !!quiniela;
+  const esPagado = quiniela?.estado_pago === 'pagado';
+  const todoSel  = partidos.length > 0 && Object.keys(predicciones).length === partidos.length;
+  const selCount = Object.keys(predicciones).length;
 
   return (
     <View style={styles.root}>
@@ -156,7 +138,7 @@ export default function QuinielaScreen() {
 
         {jornada && partidos.length > 0 && (
           <>
-            {/* Banner estado */}
+            {/* Banner si ya pagó */}
             {yaGuardo && (
               <View style={[styles.statusBanner, esPagado ? styles.bannerGreen : styles.bannerOrange]}>
                 <Ionicons name={esPagado ? 'checkmark-circle' : 'time-outline'} size={18} color="#fff"/>
@@ -164,14 +146,12 @@ export default function QuinielaScreen() {
                   <Text style={styles.statusText}>
                     {esPagado ? '¡Pago confirmado — Estás participando! 🎉' : 'Pago pendiente — Confirma tu pago'}
                   </Text>
-                  {quiniela?.codigo && (
-                    <Text style={styles.codigoText}>Código: {quiniela.codigo}</Text>
-                  )}
+                  {quiniela?.codigo && <Text style={styles.codigoText}>Código: {quiniela.codigo}</Text>}
                 </View>
               </View>
             )}
 
-            {/* Barra progreso */}
+            {/* Progreso selección */}
             {!yaGuardo && (
               <View style={styles.progressBox}>
                 <View style={styles.progressRow}>
@@ -215,39 +195,17 @@ export default function QuinielaScreen() {
               </View>
             ))}
 
-            {/* Botón guardar */}
+            {/* Botón ir a pagar */}
             {!yaGuardo && (
               <TouchableOpacity
-                style={[styles.btnGuardar, !todoSel && styles.btnDisabled]}
-                onPress={guardarQuiniela}
-                disabled={!todoSel || guardando}
+                style={[styles.btnPagar, !todoSel && styles.btnDisabled]}
+                onPress={irAPagar}
+                disabled={!todoSel}
                 activeOpacity={0.8}
               >
-                {guardando
-                  ? <ActivityIndicator color="#fff"/>
-                  : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={styles.btnGuardarTexto}>Guardar quiniela</Text></>}
+                <Ionicons name="card" size={20} color="#fff"/>
+                <Text style={styles.btnPagarTexto}>Pagar con Mercado Pago</Text>
               </TouchableOpacity>
-            )}
-
-            {/* Card pago */}
-            {yaGuardo && !esPagado && (
-              <View style={styles.pagoCard}>
-                <Ionicons name="wallet-outline" size={28} color={C.accent} style={{marginBottom:8}}/>
-                <Text style={styles.pagoTitulo}>Confirma tu pago</Text>
-                <View style={styles.codigoBadge}>
-                  <Text style={styles.codigoBadgeLabel}>Tu código</Text>
-                  <Text style={styles.codigoBadgeValue}>{quiniela?.codigo}</Text>
-                </View>
-                <Text style={styles.pagoTexto}>Envía tu comprobante con este código al administrador para participar.</Text>
-                <TouchableOpacity
-                  style={styles.btnWsp}
-                  onPress={() => Linking.openURL(`https://wa.me/521XXXXXXXXXX?text=Hola%2C+quiero+confirmar+mi+pago.+Mi+c%C3%B3digo+es+${quiniela?.codigo}+%E2%80%94+${jornada.nombre}`)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="logo-whatsapp" size={18} color="#fff"/>
-                  <Text style={styles.btnWspTexto}>Enviar comprobante</Text>
-                </TouchableOpacity>
-              </View>
             )}
           </>
         )}
@@ -269,8 +227,7 @@ const styles = StyleSheet.create({
   statusBanner:{flexDirection:'row',alignItems:'flex-start',gap:10,marginHorizontal:16,marginBottom:12,padding:14,borderRadius:12},
   bannerGreen:{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green},
   bannerOrange:{backgroundColor:'rgba(255,159,67,0.15)',borderWidth:1,borderColor:C.orange},
-  statusText:{color:C.text,fontWeight:'600',fontSize:13},
-  codigoText:{color:C.textSub,fontSize:12,marginTop:3},
+  statusText:{color:C.text,fontWeight:'600',fontSize:13}, codigoText:{color:C.textSub,fontSize:12,marginTop:3},
   progressBox:{marginHorizontal:16,marginBottom:12,backgroundColor:C.card,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
   progressRow:{flexDirection:'row',justifyContent:'space-between',marginBottom:8},
   progressLabel:{color:C.textSub,fontSize:13}, progressPct:{color:C.accent,fontSize:13,fontWeight:'700'},
@@ -286,14 +243,6 @@ const styles = StyleSheet.create({
   opcionActiva:{backgroundColor:C.accentDim,borderColor:C.accent},
   opcionLetra:{fontSize:17,fontWeight:'bold',color:C.textSub}, opcionLetraActiva:{color:C.accent},
   opcionEquipo:{fontSize:11,color:'#555577',marginTop:3}, opcionEquipoActivo:{color:C.accent},
-  btnGuardar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:C.accent,marginHorizontal:16,marginTop:6,padding:16,borderRadius:14},
-  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.6}, btnGuardarTexto:{color:'#fff',fontWeight:'bold',fontSize:16},
-  pagoCard:{backgroundColor:C.card,marginHorizontal:16,marginTop:6,borderRadius:14,padding:20,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
-  pagoTitulo:{fontSize:16,fontWeight:'bold',color:C.text,marginBottom:12},
-  codigoBadge:{backgroundColor:C.accentDim,borderWidth:1.5,borderColor:C.accent,borderRadius:12,paddingHorizontal:20,paddingVertical:10,alignItems:'center',marginBottom:12},
-  codigoBadgeLabel:{color:C.textSub,fontSize:11,fontWeight:'600'},
-  codigoBadgeValue:{color:C.accent,fontSize:24,fontWeight:'bold',letterSpacing:2},
-  pagoTexto:{fontSize:13,color:C.textSub,textAlign:'center',lineHeight:20,marginBottom:16},
-  btnWsp:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:'#25d366',paddingHorizontal:20,paddingVertical:12,borderRadius:10},
-  btnWspTexto:{color:'#fff',fontWeight:'bold',fontSize:14},
+  btnPagar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,backgroundColor:'#009ee3',marginHorizontal:16,marginTop:6,padding:17,borderRadius:14},
+  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.6}, btnPagarTexto:{color:'#fff',fontWeight:'bold',fontSize:16},
 });
