@@ -1,32 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert, KeyboardAvoidingView,
   Platform, ScrollView, ActivityIndicator,
 } from 'react-native';
-import * as Linking from 'expo-linking';
 import { supabase } from '../lib/supabase';
 
 export default function LoginScreen() {
-  const [step, setStep] = useState<'email' | 'enviado'>('email');
+  const [step, setStep] = useState<'email' | 'codigo'>('email');
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
+  const [codigo, setCodigo] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
+  const inputs = useRef<(TextInput | null)[]>([]);
 
-  useEffect(() => {
-    const handleUrl = async (url: string) => {
-      if (!url) return;
-      if (url.includes('access_token') || url.includes('token_hash')) {
-        const { error } = await supabase.auth.getSessionFromUrl(url as any);
-        if (error) Alert.alert('Error', 'El enlace no es valido o ya expiro.');
-      }
-    };
-    Linking.getInitialURL().then((url) => { if (url) handleUrl(url); });
-    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
-    return () => sub.remove();
-  }, []);
-
-  const enviarMagicLink = async () => {
+  const enviarCodigo = async () => {
     if (!email || !nombre) {
       Alert.alert('Datos incompletos', 'Ingresa tu nombre y correo.');
       return;
@@ -40,16 +28,60 @@ export default function LoginScreen() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: emailLimpio,
-      options: {
-        data: { nombre },
-        emailRedirectTo: 'quinielapro://login',
-      },
+      options: { data: { nombre } },
     });
     setLoading(false);
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      setStep('enviado');
+      setStep('codigo');
+    }
+  };
+
+  const verificarCodigo = async () => {
+    const token = codigo.join('');
+    if (token.length < 6) {
+      Alert.alert('Codigo incompleto', 'Ingresa los 6 digitos del codigo.');
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim().toLowerCase(),
+      token,
+      type: 'email',
+    });
+    setLoading(false);
+    if (error) {
+      Alert.alert('Codigo invalido', 'El codigo es incorrecto o ya expiro. Solicita uno nuevo.');
+      setCodigo(['', '', '', '', '', '']);
+      inputs.current[0]?.focus();
+    }
+    // Si es correcto, AuthContext detecta la sesion y redirige automaticamente
+  };
+
+  const handleDigito = (text: string, index: number) => {
+    // Permite pegar los 6 digitos de una vez
+    if (text.length === 6 && /^\d{6}$/.test(text)) {
+      const digits = text.split('');
+      setCodigo(digits);
+      inputs.current[5]?.focus();
+      return;
+    }
+    const digit = text.replace(/[^0-9]/g, '').slice(-1);
+    const nuevo = [...codigo];
+    nuevo[index] = digit;
+    setCodigo(nuevo);
+    if (digit && index < 5) {
+      inputs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleBackspace = (key: string, index: number) => {
+    if (key === 'Backspace' && !codigo[index] && index > 0) {
+      const nuevo = [...codigo];
+      nuevo[index - 1] = '';
+      setCodigo(nuevo);
+      inputs.current[index - 1]?.focus();
     }
   };
 
@@ -69,7 +101,7 @@ export default function LoginScreen() {
           {step === 'email' ? (
             <>
               <Text style={styles.cardTitulo}>Inicia sesion</Text>
-              <Text style={styles.cardSub}>Te enviaremos un enlace magico a tu correo</Text>
+              <Text style={styles.cardSub}>Te enviaremos un codigo de 6 digitos a tu correo</Text>
 
               <Text style={styles.label}>Nombre completo</Text>
               <TextInput
@@ -95,44 +127,58 @@ export default function LoginScreen() {
 
               <TouchableOpacity
                 style={[styles.btn, loading && styles.btnDisabled]}
-                onPress={enviarMagicLink}
+                onPress={enviarCodigo}
                 disabled={loading}
               >
                 {loading
                   ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.btnTexto}>Enviar enlace de acceso</Text>
+                  : <Text style={styles.btnTexto}>Enviar codigo</Text>
                 }
               </TouchableOpacity>
             </>
           ) : (
             <>
               <Text style={styles.enviadoEmoji}>📧</Text>
-              <Text style={styles.cardTitulo}>Revisa tu correo!</Text>
-              <Text style={styles.cardSub}>Enviamos un enlace a: {email}</Text>
+              <Text style={styles.cardTitulo}>Revisa tu correo</Text>
+              <Text style={styles.cardSub}>
+                Abre el correo de Supabase y copia el codigo de 6 digitos que aparece en el enlace.
+              </Text>
 
-              <View style={styles.pasos}>
-                <Text style={styles.paso}>1 - Abre tu app de correo</Text>
-                <Text style={styles.paso}>2 - Busca el correo de Quiniela Pro</Text>
-                <Text style={styles.paso}>3 - Toca el boton "Sign in"</Text>
-                <Text style={styles.paso}>4 - La app te abrira automaticamente</Text>
+              <Text style={styles.labelCodigo}>Ingresa el codigo</Text>
+              <View style={styles.codigoContainer}>
+                {codigo.map((digit, i) => (
+                  <TextInput
+                    key={i}
+                    ref={(ref) => { inputs.current[i] = ref; }}
+                    style={[styles.digitInput, digit ? styles.digitFilled : null]}
+                    value={digit}
+                    onChangeText={(text) => handleDigito(text, i)}
+                    onKeyPress={({ nativeEvent }) => handleBackspace(nativeEvent.key, i)}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    selectTextOnFocus
+                    autoFocus={i === 0}
+                  />
+                ))}
               </View>
 
               <TouchableOpacity
-                style={styles.btnSecundario}
-                onPress={() => setStep('email')}
-              >
-                <Text style={styles.btnSecundarioTexto}>Usar otro correo</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.btn, { marginTop: 10 }, loading && styles.btnDisabled]}
-                onPress={enviarMagicLink}
+                style={[styles.btn, loading && styles.btnDisabled]}
+                onPress={verificarCodigo}
                 disabled={loading}
               >
                 {loading
                   ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.btnTexto}>Reenviar enlace</Text>
+                  : <Text style={styles.btnTexto}>Verificar y entrar</Text>
                 }
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.btnSecundario} onPress={enviarCodigo} disabled={loading}>
+                <Text style={styles.btnSecundarioTexto}>Reenviar codigo</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.btnSecundario} onPress={() => { setStep('email'); setCodigo(['','','','','','']); }}>
+                <Text style={styles.btnSecundarioTexto}>Usar otro correo</Text>
               </TouchableOpacity>
             </>
           )}
@@ -152,13 +198,15 @@ const styles = StyleSheet.create({
   cardTitulo: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', textAlign: 'center' },
   cardSub: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 20, marginTop: 6, lineHeight: 20 },
   label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 5 },
+  labelCodigo: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 12, textAlign: 'center' },
   input: { borderWidth: 1.5, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 15, color: '#333', backgroundColor: '#fafafa' },
+  codigoContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
+  digitInput: { width: 44, height: 54, borderWidth: 2, borderColor: '#ddd', borderRadius: 10, textAlign: 'center', fontSize: 22, fontWeight: 'bold', color: '#1a1a2e', backgroundColor: '#fafafa' },
+  digitFilled: { borderColor: '#009ee3', backgroundColor: '#e8f4fd' },
   btn: { backgroundColor: '#009ee3', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 4 },
   btnDisabled: { backgroundColor: '#90caf9' },
   btnTexto: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  btnSecundario: { alignItems: 'center', marginTop: 16 },
+  btnSecundario: { alignItems: 'center', marginTop: 14 },
   btnSecundarioTexto: { color: '#009ee3', fontSize: 14 },
   enviadoEmoji: { fontSize: 48, textAlign: 'center', marginBottom: 10 },
-  pasos: { backgroundColor: '#f0f2f5', borderRadius: 10, padding: 16, marginBottom: 8 },
-  paso: { fontSize: 14, color: '#444', marginBottom: 8, lineHeight: 20 },
 });
