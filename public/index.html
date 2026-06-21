@@ -7,27 +7,37 @@
       name="viewport"
       content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
     />
-
-    <!-- Safari status bar / notch color -->
     <meta name="theme-color" content="#1a1a2e" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-
     <title>Quiniela Pro</title>
     <style>
-      /* Elimina franjas blancas en Safari iOS */
-      html, body, #root {
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html {
         background-color: #1a1a2e;
-        margin: 0;
-        padding: 0;
-        width: 100%;
+        /* Rellena el área del notch arriba con el color de la app */
+        background-image:
+          linear-gradient(to bottom, #1a1a2e env(safe-area-inset-top), transparent env(safe-area-inset-top)),
+          linear-gradient(to top, #0d0d1a env(safe-area-inset-bottom), transparent env(safe-area-inset-bottom));
         height: 100%;
-        /* Extiende el contenido bajo el notch y la barra de gestos */
+      }
+
+      body {
+        background-color: #1a1a2e;
+        height: 100%;
+        /* Evita scroll rebote en Safari que expone el fondo blanco */
+        overscroll-behavior: none;
+        overflow: hidden;
+      }
+
+      #root {
+        height: 100%;
+        /* El contenido respeta las zonas seguras del iPhone */
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
-        box-sizing: border-box;
       }
     </style>
   </head>

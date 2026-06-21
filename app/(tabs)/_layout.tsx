@@ -13,6 +13,10 @@ function TabIcon({ name, focused }: { name: any; focused: boolean }) {
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  // En web Safari la barra del navegador consume espacio extra al fondo
+  const extraBottom = Platform.OS === 'web' ? 16 : 0;
+  const bottomPad = insets.bottom + extraBottom;
+
   return (
     <Tabs
       screenOptions={{
@@ -22,11 +26,19 @@ export default function TabsLayout() {
           backgroundColor: '#0d0d1a',
           borderTopColor: '#1e1e30',
           borderTopWidth: 1,
-          height: 56 + insets.bottom,
-          paddingBottom: insets.bottom + 6,
+          // Altura suficiente para icono + label + safe area
+          height: 64 + bottomPad,
+          paddingBottom: bottomPad + 4,
           paddingTop: 6,
         },
-        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+          marginTop: 2,
+        },
+        tabBarIconStyle: {
+          marginBottom: 0,
+        },
         headerShown: false,
       }}
     >
