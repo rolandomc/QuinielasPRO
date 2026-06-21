@@ -87,12 +87,18 @@ export default function PerfilScreen() {
         quinielas.map((q, i) => {
           const badge = estadoBadge(q.estado_pago);
           return (
-            <View key={i} style={styles.quinielaCard}>
+            <TouchableOpacity
+              key={i}
+              style={styles.quinielaCard}
+              onPress={() => router.push({ pathname: '/mis-pronosticos', params: { jornada: q.jornada } })}
+              activeOpacity={0.8}
+            >
               <View style={styles.quinielaHeader}>
                 <Text style={styles.quinielaTitulo}>Jornada {q.jornada}</Text>
-                <Text style={styles.quinielaFecha}>
-                  {new Date(q.created_at).toLocaleDateString('es-MX')}
-                </Text>
+                <View style={styles.verDetalleRow}>
+                  <Text style={styles.verDetalle}>Ver pronósticos</Text>
+                  <Ionicons name="chevron-forward" size={14} color="#009ee3" />
+                </View>
               </View>
               <View style={[styles.badge, { backgroundColor: badge.bg }]}>
                 <Text style={styles.badgeTexto}>{badge.label}</Text>
@@ -100,7 +106,7 @@ export default function PerfilScreen() {
               {q.aciertos > 0 && (
                 <Text style={styles.aciertos}>🎯 {q.aciertos} aciertos</Text>
               )}
-            </View>
+            </TouchableOpacity>
           );
         })
       )}
@@ -130,9 +136,10 @@ const styles = StyleSheet.create({
   emptyBox: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 12, alignItems: 'center' },
   emptyText: { color: '#888', fontSize: 14 },
   quinielaCard: { backgroundColor: '#fff', margin: 10, marginTop: 4, borderRadius: 12, padding: 15, elevation: 2 },
-  quinielaHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  quinielaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   quinielaTitulo: { fontWeight: 'bold', fontSize: 15, color: '#1a1a2e' },
-  quinielaFecha: { fontSize: 12, color: '#aaa' },
+  verDetalleRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  verDetalle: { fontSize: 12, color: '#009ee3', fontWeight: '600' },
   badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, alignSelf: 'flex-start' },
   badgeTexto: { color: '#fff', fontSize: 12, fontWeight: '600' },
   aciertos: { marginTop: 8, fontSize: 13, color: '#2e7d32', fontWeight: '600' },
