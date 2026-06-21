@@ -6,10 +6,11 @@ import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
 type Quiniela = {
+  id: string;
   jornada: number;
   estado_pago: string;
   aciertos: number;
-  creado_en: string;
+  created_at: string;
 };
 
 export default function PerfilScreen() {
@@ -23,9 +24,9 @@ export default function PerfilScreen() {
       if (!user) return;
       const { data } = await supabase
         .from('quinielas')
-        .select('jornada, estado_pago, aciertos, creado_en')
+        .select('id, jornada, estado_pago, aciertos, created_at')
         .eq('usuario_id', user.id)
-        .order('creado_en', { ascending: false });
+        .order('created_at', { ascending: false });
       if (data) setQuinielas(data);
       setLoading(false);
     };
@@ -39,9 +40,9 @@ export default function PerfilScreen() {
 
   const estadoBadge = (estado: string) => {
     switch (estado) {
-      case 'pagado': return { label: '✅ Pagado — Participando', bg: '#1b5e20' };
-      case 'pendiente': return { label: '⏳ Pago pendiente', bg: '#e65100' };
-      default: return { label: '❌ Sin pago', bg: '#b71c1c' };
+      case 'pagado': return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
+      case 'pendiente': return { label: '\u23F3 Pago pendiente', bg: '#e65100' };
+      default: return { label: '\u274C Sin pago', bg: '#b71c1c' };
     }
   };
 
@@ -55,6 +56,12 @@ export default function PerfilScreen() {
         </View>
         <Text style={styles.nombre}>{usuario?.nombre || 'Jugador'}</Text>
         <Text style={styles.email}>{user?.email}</Text>
+        {usuario?.es_admin && (
+          <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
+            <Ionicons name="shield-checkmark" size={16} color="#fff" />
+            <Text style={styles.btnAdminTexto}>Panel de Administrador</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.statsRow}>
@@ -84,7 +91,7 @@ export default function PerfilScreen() {
               <View style={styles.quinielaHeader}>
                 <Text style={styles.quinielaTitulo}>Jornada {q.jornada}</Text>
                 <Text style={styles.quinielaFecha}>
-                  {new Date(q.creado_en).toLocaleDateString('es-MX')}
+                  {new Date(q.created_at).toLocaleDateString('es-MX')}
                 </Text>
               </View>
               <View style={[styles.badge, { backgroundColor: badge.bg }]}>
@@ -113,6 +120,8 @@ const styles = StyleSheet.create({
   avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#009ee3', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   nombre: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
   email: { color: '#aaa', fontSize: 13, marginTop: 4 },
+  btnAdmin: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#009ee3', marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  btnAdminTexto: { color: '#fff', fontWeight: '600', fontSize: 13 },
   statsRow: { flexDirection: 'row', margin: 15, gap: 10 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 18, alignItems: 'center', elevation: 2 },
   statNum: { fontSize: 32, fontWeight: 'bold', color: '#009ee3' },
