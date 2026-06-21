@@ -10,7 +10,6 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // Verificar JWT del usuario autenticado
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) throw new Error('No autorizado')
 
@@ -19,16 +18,15 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Obtener usuario desde el JWT
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token)
-    if (authError || !user) throw new Error('Token inválido')
+    if (authError || !user) throw new Error('Token invalido')
 
     const { nombre, usuario_id, jornada } = await req.json()
     const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
     const appUrl = Deno.env.get('APP_URL') ?? 'https://quinielapro.app'
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
 
-    // Crear preferencia en Mercado Pago
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
       headers: {
@@ -41,32 +39,37 @@ serve(async (req) => {
         back_urls: {
           success: `${appUrl}/pago/exito`,
           failure: `${appUrl}/pago/error`,
-          pending: `${appUrl}/pago/error`,
+          pending: `${appUrl}/pago/pendiente`,
         },
         auto_return: 'approved',
         metadata: { usuario_id, jornada },
-        notification_url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/webhook-mp`,
+        // URL corregida: webhook-pago (antes decia webhook-mp)
+        notification_url: `${supabaseUrl}/functions/v1/webhook-pago`,
       })
     })
 
     const mpData = await mpResponse.json()
+    console.log('MP preference creada:', JSON.stringify({ id: mpData.id, sandbox_url: mpData.sandbox_init_point }))
     if (!mpData.id) throw new Error('MP Error: ' + JSON.stringify(mpData))
 
-    // Crear o actualizar registro en quinielas
+    // Guardar preference_id en quinielas para poder consultar el estado despues
     await supabaseClient.from('quinielas').upsert([
       {
         usuario_id,
         jornada,
-        mp_preference_id: mpData.id,
         estado_pago: 'pendiente',
       }
     ], { onConflict: 'usuario_id,jornada' })
 
-    return new Response(JSON.stringify({ urlPago: mpData.init_point }), {
+    // En sandbox usar sandbox_init_point, en produccion usar init_point
+    const urlPago = mpData.sandbox_init_point || mpData.init_point
+
+    return new Response(JSON.stringify({ urlPago }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
   } catch (error: any) {
+    console.error('Error crear-pago:', error.message)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400
     })
