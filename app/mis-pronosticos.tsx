@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
+import {
+  View, Text, StyleSheet, ScrollView, ActivityIndicator,
+  TouchableOpacity, StatusBar, Share, Platform,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -24,18 +27,13 @@ export default function MisPronosticosScreen() {
 
   const cargar = async () => {
     setLoading(true);
-    // Filtrar por jornada_id (UUID) — no por el numero viejo
     const { data: partidos } = await supabase
-      .from('partidos')
-      .select('id,local,visitante,fecha,resultado_final')
-      .eq('jornada_id', jornada_id)
-      .order('fecha');
+      .from('partidos').select('id,local,visitante,fecha,resultado_final')
+      .eq('jornada_id', jornada_id).order('fecha');
     if (!partidos || partidos.length === 0) { setFilas([]); setLoading(false); return; }
     const { data: preds } = await supabase
-      .from('predicciones')
-      .select('partido_id,resultado')
-      .eq('usuario_id', user!.id)
-      .in('partido_id', partidos.map(p => p.id));
+      .from('predicciones').select('partido_id,resultado')
+      .eq('usuario_id', user!.id).in('partido_id', partidos.map(p => p.id));
     const predMap: Record<string, string> = {};
     (preds || []).forEach(p => { predMap[p.partido_id] = p.resultado; });
     const filasCalc: FilaPartido[] = partidos.map(p => {
@@ -53,10 +51,34 @@ export default function MisPronosticosScreen() {
 
   const etiqueta = (val: string | null) => {
     if (!val) return '—';
-    if (val === '1') return 'Local';
-    if (val === 'X') return 'Empate';
-    if (val === '2') return 'Visitante';
+    if (val === '1') return 'Local 🟦';
+    if (val === 'X') return 'Empate ⚪';
+    if (val === '2') return 'Visitante 🔵';
     return val;
+  };
+
+  // ── Compartir quiniela como texto ──
+  const compartirQuiniela = async () => {
+    const emoji = (v: string | null) => v === '1' ? '🔵' : v === 'X' ? '⚪' : v === '2' ? '🟥' : '❓';
+    const lineas = filas.map(f => `${emoji(f.mi_prediccion)} ${f.local} vs ${f.visitante}`);
+    const resumen = total > 0 ? `\n\n✅ ${aciertos}/${total} aciertos (${Math.round(aciertos/total*100)}%)` : '';
+    const texto = [
+      `🏆 Mi Quiniela — ${jornada_nombre}`,
+      '',
+      ...lineas,
+      resumen,
+      '',
+      '🔵 Local  ⚪ Empate  🟥 Visitante',
+    ].join('\n');
+    if (Platform.OS === 'web') {
+      try {
+        await (navigator as any).share({ title: `Quiniela — ${jornada_nombre}`, text: texto });
+      } catch {
+        await (navigator as any).clipboard.writeText(texto);
+      }
+    } else {
+      await Share.share({ message: texto, title: `Quiniela — ${jornada_nombre}` });
+    }
   };
 
   const porcentaje = total > 0 ? Math.round((aciertos / total) * 100) : 0;
@@ -69,7 +91,13 @@ export default function MisPronosticosScreen() {
           <Ionicons name="arrow-back" size={22} color={C.text}/>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{jornada_nombre || 'Mis pronósticos'}</Text>
-        <View style={{ width: 40 }}/>
+        {/* Botón compartir */}
+        {filas.length > 0 && (
+          <TouchableOpacity onPress={compartirQuiniela} style={styles.shareBtn} activeOpacity={0.8}>
+            <Ionicons name="share-social-outline" size={20} color={C.accent}/>
+          </TouchableOpacity>
+        )}
+        {filas.length === 0 && <View style={{ width: 40 }} />}
       </View>
 
       {loading ? (
@@ -93,6 +121,15 @@ export default function MisPronosticosScreen() {
                 <Text style={styles.resumenLabel}>Pendientes</Text>
               </View>
             </View>
+          )}
+
+          {/* Banner compartir */}
+          {filas.length > 0 && (
+            <TouchableOpacity style={styles.compartirBanner} onPress={compartirQuiniela} activeOpacity={0.8}>
+              <Ionicons name="share-social" size={16} color={C.accent}/>
+              <Text style={styles.compartirBannerTexto}>Compartir mis predicciones</Text>
+              <Ionicons name="chevron-forward" size={14} color={C.accent}/>
+            </TouchableOpacity>
           )}
 
           {filas.length === 0 ? (
@@ -146,7 +183,10 @@ const styles = StyleSheet.create({
   center:{flex:1,justifyContent:'center',alignItems:'center'},
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
   backBtn:{padding:6,borderRadius:10,backgroundColor:C.card},
+  shareBtn:{padding:6,borderRadius:10,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent},
   headerTitle:{color:C.text,fontSize:17,fontWeight:'bold',flex:1,textAlign:'center',marginHorizontal:8},
+  compartirBanner:{flexDirection:'row',alignItems:'center',gap:8,marginHorizontal:16,marginBottom:12,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent,borderRadius:12,padding:12},
+  compartirBannerTexto:{flex:1,color:C.accent,fontWeight:'700',fontSize:13},
   resumen:{flexDirection:'row',backgroundColor:C.card,marginHorizontal:16,marginBottom:12,borderRadius:14,padding:20,alignItems:'center',justifyContent:'space-around',borderWidth:1,borderColor:C.cardBorder},
   resumenItem:{alignItems:'center'},
   resumenNum:{color:C.accent,fontSize:28,fontWeight:'bold'},
