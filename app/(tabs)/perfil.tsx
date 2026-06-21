@@ -1,20 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, ActivityIndicator, RefreshControl,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
-type Quiniela = {
-  id: string;
-  jornada: number;
-  estado_pago: string;
-  aciertos: number;
-  creado_en: string;
+const C = {
+  bg: '#0d0d1a', card: '#161625', cardBorder: '#1e1e35',
+  accent: '#00b4d8', accentDim: 'rgba(0,180,216,0.12)',
+  text: '#f0f0ff', textSub: '#8888aa',
+  green: '#00c897', orange: '#ff9f43', red: '#ff6b6b',
 };
+
+type Quiniela = { id: string; jornada: number; estado_pago: string; aciertos: number; creado_en: string };
 
 export default function PerfilScreen() {
   const { user, usuario, signOut, refreshUsuario } = useAuth();
@@ -25,149 +23,142 @@ export default function PerfilScreen() {
 
   const fetchQuinielas = useCallback(async () => {
     if (!user) return;
-    const { data, error } = await supabase
-      .from('quinielas')
-      .select('id, jornada, estado_pago, aciertos, creado_en')
-      .eq('usuario_id', user.id)
-      .order('creado_en', { ascending: false });
-    if (error) console.error('Error quinielas perfil:', error.message);
+    const { data } = await supabase.from('quinielas').select('id, jornada, estado_pago, aciertos, creado_en').eq('usuario_id', user.id).order('creado_en', { ascending: false });
     if (data) setQuinielas(data);
   }, [user]);
 
-  useEffect(() => {
-    if (user) {
-      setLoading(true);
-      fetchQuinielas().finally(() => setLoading(false));
-    }
-  }, [user, fetchQuinielas]);
+  useEffect(() => { if (user) { setLoading(true); fetchQuinielas().finally(() => setLoading(false)); } }, [user, fetchQuinielas]);
+  const onRefresh = useCallback(async () => { setRefreshing(true); await Promise.all([fetchQuinielas(), refreshUsuario()]); setRefreshing(false); }, [fetchQuinielas, refreshUsuario]);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.all([fetchQuinielas(), refreshUsuario()]);
-    setRefreshing(false);
-  }, [fetchQuinielas, refreshUsuario]);
+  const cerrarSesion = async () => { await signOut(); router.replace('/login'); };
 
-  const cerrarSesion = async () => {
-    await signOut();
-    router.replace('/login');
-  };
-
-  const estadoBadge = (estado: string) => {
+  const estadoConfig = (estado: string) => {
     switch (estado) {
-      case 'pagado':    return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
-      case 'pendiente': return { label: '\u23f3 Pago pendiente',             bg: '#e65100' };
-      default:          return { label: '\u274c Sin pago',                    bg: '#b71c1c' };
+      case 'pagado':    return { label: 'Pagado \u2014 Participando', color: C.green,  icon: 'checkmark-circle' as const };
+      case 'pendiente': return { label: 'Pago pendiente',             color: C.orange, icon: 'time-outline' as const };
+      default:          return { label: 'Sin pago',                    color: C.red,    icon: 'close-circle' as const };
     }
   };
 
-  const totalAciertos = quinielas.reduce((acc, q) => acc + (q.aciertos || 0), 0);
+  const totalAciertos = quinielas.reduce((a, q) => a + (q.aciertos || 0), 0);
+  const pagadas = quinielas.filter(q => q.estado_pago === 'pagado').length;
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#009ee3']} tintColor="#009ee3" />
-      }
-    >
-      <View style={styles.avatarSection}>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={50} color="#fff" />
-        </View>
-        <Text style={styles.username}>
-          {usuario?.username ? `@${usuario.username}` : usuario?.nombre || 'Jugador'}
-        </Text>
-        {usuario?.nombre && usuario?.username && (
-          <Text style={styles.nombre}>{usuario.nombre}</Text>
-        )}
-        <Text style={styles.email}>{user?.email}</Text>
-        {usuario?.es_admin && (
-          <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
-            <Ionicons name="shield-checkmark" size={16} color="#fff" />
-            <Text style={styles.btnAdminTexto}>Panel de Administrador</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <ScrollView style={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />} showsVerticalScrollIndicator={false}>
 
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statNum}>{totalAciertos}</Text>
-          <Text style={styles.statLabel}>Aciertos totales</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statNum}>{quinielas.length}</Text>
-          <Text style={styles.statLabel}>Quinielas jugadas</Text>
-        </View>
-      </View>
-
-      <Text style={styles.seccion}>Mis quinielas</Text>
-
-      {loading ? (
-        <ActivityIndicator color="#009ee3" style={{ margin: 20 }} />
-      ) : quinielas.length === 0 ? (
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>Aún no has participado en ninguna quiniela.</Text>
-        </View>
-      ) : (
-        quinielas.map((q, i) => {
-          const badge = estadoBadge(q.estado_pago);
-          return (
-            <TouchableOpacity
-              key={i}
-              style={styles.quinielaCard}
-              onPress={() => router.push({ pathname: '/mis-pronosticos', params: { jornada: q.jornada } })}
-              activeOpacity={0.8}
-            >
-              <View style={styles.quinielaHeader}>
-                <Text style={styles.quinielaTitulo}>Jornada {q.jornada}</Text>
-                <View style={styles.verDetalleRow}>
-                  <Text style={styles.verDetalle}>Ver pronósticos</Text>
-                  <Ionicons name="chevron-forward" size={14} color="#009ee3" />
-                </View>
-              </View>
-              <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                <Text style={styles.badgeTexto}>{badge.label}</Text>
-              </View>
-              {q.aciertos > 0 && (
-                <Text style={styles.aciertos}>🎯 {q.aciertos} aciertos</Text>
-              )}
+        {/* Hero */}
+        <View style={styles.hero}>
+          <View style={styles.avatarRing}>
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={40} color="#fff" />
+            </View>
+          </View>
+          <Text style={styles.username}>{usuario?.username ? `@${usuario.username}` : usuario?.nombre || 'Jugador'}</Text>
+          {usuario?.nombre && usuario?.username && <Text style={styles.nombre}>{usuario.nombre}</Text>}
+          <Text style={styles.email}>{user?.email}</Text>
+          {usuario?.es_admin && (
+            <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')} activeOpacity={0.8}>
+              <Ionicons name="shield-checkmark" size={14} color="#fff" />
+              <Text style={styles.btnAdminTexto}>Panel Admin</Text>
             </TouchableOpacity>
-          );
-        })
-      )}
+          )}
+        </View>
 
-      <TouchableOpacity style={styles.btnCerrar} onPress={cerrarSesion}>
-        <Ionicons name="log-out-outline" size={20} color="#e53935" />
-        <Text style={styles.btnCerrarTexto}>Cerrar sesión</Text>
-      </TouchableOpacity>
-      <View style={{ height: 30 }} />
-    </ScrollView>
+        {/* Stats */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statNum}>{quinielas.length}</Text>
+            <Text style={styles.statLabel}>Jugadas</Text>
+          </View>
+          <View style={[styles.statCard, { borderColor: C.accent }]}>
+            <Text style={[styles.statNum, { color: C.accent }]}>{totalAciertos}</Text>
+            <Text style={styles.statLabel}>Aciertos</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={[styles.statNum, { color: C.green }]}>{pagadas}</Text>
+            <Text style={styles.statLabel}>Pagadas</Text>
+          </View>
+        </View>
+
+        {/* Quinielas */}
+        <Text style={styles.seccionTitulo}>Mis quinielas</Text>
+
+        {loading ? (
+          <ActivityIndicator color={C.accent} style={{ margin: 30 }} />
+        ) : quinielas.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={{ fontSize: 40, marginBottom: 10 }}>🎮</Text>
+            <Text style={styles.emptyTexto}>Aún no has participado en ninguna quiniela.</Text>
+          </View>
+        ) : (
+          quinielas.map((q, i) => {
+            const est = estadoConfig(q.estado_pago);
+            return (
+              <TouchableOpacity
+                key={i}
+                style={styles.quinielaCard}
+                onPress={() => router.push({ pathname: '/mis-pronosticos', params: { jornada: q.jornada } })}
+                activeOpacity={0.75}
+              >
+                <View style={styles.qCardTop}>
+                  <View>
+                    <Text style={styles.qJornada}>Jornada {q.jornada}</Text>
+                    <View style={styles.qEstadoRow}>
+                      <Ionicons name={est.icon} size={13} color={est.color} />
+                      <Text style={[styles.qEstado, { color: est.color }]}>{est.label}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.qAciertosBox}>
+                    {q.aciertos > 0 && <Text style={styles.qAciertosNum}>{q.aciertos}</Text>}
+                    {q.aciertos > 0 && <Text style={styles.qAciertosLabel}>aciertos</Text>}
+                    <Ionicons name="chevron-forward" size={16} color={C.textSub} style={{ marginTop: q.aciertos > 0 ? 0 : 4 }} />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
+
+        {/* Cerrar sesion */}
+        <TouchableOpacity style={styles.btnCerrar} onPress={cerrarSesion} activeOpacity={0.8}>
+          <Ionicons name="log-out-outline" size={18} color={C.red} />
+          <Text style={styles.btnCerrarTexto}>Cerrar sesión</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 50 }} />
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5' },
-  avatarSection: { backgroundColor: '#1a1a2e', alignItems: 'center', padding: 30 },
-  avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#009ee3', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  username: { color: '#009ee3', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
-  nombre: { color: '#fff', fontSize: 14, opacity: 0.75, marginBottom: 2 },
-  email: { color: '#aaa', fontSize: 12, marginTop: 2 },
-  btnAdmin: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#009ee3', marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  btnAdminTexto: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  statsRow: { flexDirection: 'row', margin: 15, gap: 10 },
-  statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 18, alignItems: 'center', elevation: 2 },
-  statNum: { fontSize: 32, fontWeight: 'bold', color: '#009ee3' },
-  statLabel: { fontSize: 12, color: '#888', marginTop: 4 },
-  seccion: { fontSize: 16, fontWeight: 'bold', color: '#1a1a2e', marginHorizontal: 15, marginBottom: 8 },
-  emptyBox: { backgroundColor: '#fff', margin: 15, padding: 20, borderRadius: 12, alignItems: 'center' },
-  emptyText: { color: '#888', fontSize: 14 },
-  quinielaCard: { backgroundColor: '#fff', margin: 10, marginTop: 4, borderRadius: 12, padding: 15, elevation: 2 },
-  quinielaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  quinielaTitulo: { fontWeight: 'bold', fontSize: 15, color: '#1a1a2e' },
-  verDetalleRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  verDetalle: { fontSize: 12, color: '#009ee3', fontWeight: '600' },
-  badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, alignSelf: 'flex-start' },
-  badgeTexto: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  aciertos: { marginTop: 8, fontSize: 13, color: '#2e7d32', fontWeight: '600' },
-  btnCerrar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 15, padding: 15, borderRadius: 10, borderWidth: 1.5, borderColor: '#e53935', backgroundColor: '#fff' },
-  btnCerrarTexto: { color: '#e53935', fontWeight: 'bold', fontSize: 15 },
+  root: { flex: 1, backgroundColor: C.bg },
+  scroll: { flex: 1 },
+  hero: { alignItems: 'center', paddingTop: 56, paddingBottom: 28, paddingHorizontal: 20, backgroundColor: C.bg },
+  avatarRing: { width: 88, height: 88, borderRadius: 44, borderWidth: 2, borderColor: C.accent, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  avatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#1e2a35', justifyContent: 'center', alignItems: 'center' },
+  username: { color: C.text, fontSize: 22, fontWeight: 'bold' },
+  nombre: { color: C.textSub, fontSize: 14, marginTop: 2 },
+  email: { color: '#555577', fontSize: 12, marginTop: 4 },
+  btnAdmin: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.accentDim, borderWidth: 1, borderColor: C.accent, marginTop: 14, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 },
+  btnAdminTexto: { color: C.accent, fontWeight: '700', fontSize: 13 },
+  statsRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 20, gap: 10 },
+  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: C.cardBorder },
+  statNum: { fontSize: 26, fontWeight: 'bold', color: C.text },
+  statLabel: { fontSize: 11, color: C.textSub, marginTop: 3 },
+  seccionTitulo: { color: C.text, fontSize: 16, fontWeight: 'bold', marginHorizontal: 16, marginBottom: 10 },
+  emptyBox: { alignItems: 'center', padding: 30, marginHorizontal: 16, backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.cardBorder },
+  emptyTexto: { color: C.textSub, fontSize: 14, textAlign: 'center' },
+  quinielaCard: { backgroundColor: C.card, marginHorizontal: 16, marginBottom: 8, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.cardBorder },
+  qCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  qJornada: { color: C.text, fontSize: 15, fontWeight: 'bold', marginBottom: 4 },
+  qEstadoRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  qEstado: { fontSize: 12, fontWeight: '600' },
+  qAciertosBox: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+  qAciertosNum: { fontSize: 20, fontWeight: 'bold', color: C.accent },
+  qAciertosLabel: { fontSize: 11, color: C.textSub },
+  btnCerrar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, marginTop: 10, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,107,107,0.3)', backgroundColor: 'rgba(255,107,107,0.07)' },
+  btnCerrarTexto: { color: C.red, fontWeight: '700', fontSize: 15 },
 });
