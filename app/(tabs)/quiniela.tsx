@@ -26,16 +26,15 @@ export default function QuinielaScreen() {
   const [loadingPartidos, setLoadingPartidos] = useState(true);
   const [loadingPago, setLoadingPago] = useState(false);
   const [yaEnvio, setYaEnvio] = useState(false);
+  const [estadoPago, setEstadoPago] = useState<string>('pendiente');
 
   const cargarPartidos = useCallback(async () => {
     setLoadingPartidos(true);
-    // Obtener jornada activa (la más próxima no cerrada)
     const { data, error } = await supabase
       .from('partidos')
       .select('*')
       .eq('cerrado', false)
       .order('fecha', { ascending: true });
-
     if (error) {
       Alert.alert('Error', 'No se pudieron cargar los partidos.');
     } else if (data && data.length > 0) {
@@ -45,24 +44,22 @@ export default function QuinielaScreen() {
     setLoadingPartidos(false);
   }, []);
 
-  const cargarPrediccionesGuardadas = useCallback(async () => {
+  const cargarEstado = useCallback(async () => {
     if (!user || !jornada) return;
-    // Ver si ya tiene quiniela enviada para esta jornada
     const { data: quinielaData } = await supabase
       .from('quinielas')
       .select('id, estado_pago')
       .eq('usuario_id', user.id)
       .eq('jornada', jornada)
       .single();
-
-    if (quinielaData) setYaEnvio(true);
-
-    // Cargar predicciones previas
+    if (quinielaData) {
+      setYaEnvio(true);
+      setEstadoPago(quinielaData.estado_pago);
+    }
     const { data: preds } = await supabase
       .from('predicciones')
       .select('partido_id, resultado')
       .eq('usuario_id', user.id);
-
     if (preds) {
       const map: Record<string, Resultado> = {};
       preds.forEach((p) => { map[p.partido_id] = p.resultado as Resultado; });
@@ -71,7 +68,7 @@ export default function QuinielaScreen() {
   }, [user, jornada]);
 
   useEffect(() => { cargarPartidos(); }, [cargarPartidos]);
-  useEffect(() => { cargarPrediccionesGuardadas(); }, [cargarPrediccionesGuardadas]);
+  useEffect(() => { cargarEstado(); }, [cargarEstado]);
 
   const seleccionar = (partidoId: string, resultado: Resultado) => {
     if (yaEnvio) return;
@@ -85,23 +82,29 @@ export default function QuinielaScreen() {
       return;
     }
     if (!user || !jornada) return;
-
     setLoadingPago(true);
     try {
-      // 1. Guardar predicciones en Supabase
+      // 1. Guardar predicciones
       const rows = partidos.map((p) => ({
         usuario_id: user.id,
         partido_id: p.id,
         resultado: predicciones[p.id],
       }));
-
       const { error: predError } = await supabase
         .from('predicciones')
         .upsert(rows, { onConflict: 'usuario_id,partido_id' });
+      if (predError) throw new Error('Error guardando predicciones: ' + predError.message);
 
-      if (predError) throw new Error('Error guardando predicciones.');
+      // 2. Crear o actualizar registro en quinielas
+      const { error: quinielaError } = await supabase
+        .from('quinielas')
+        .upsert(
+          { usuario_id: user.id, jornada, estado_pago: 'pendiente' },
+          { onConflict: 'usuario_id,jornada' }
+        );
+      if (quinielaError) throw new Error('Error creando quiniela: ' + quinielaError.message);
 
-      // 2. Crear preferencia de pago en Mercado Pago
+      // 3. Crear preferencia de pago en Mercado Pago
       const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(
         'https://kdvbmvsolrquphfedldz.supabase.co/functions/v1/crear-pago',
@@ -118,7 +121,6 @@ export default function QuinielaScreen() {
           }),
         }
       );
-
       const data = await response.json();
       if (response.ok && data.urlPago) {
         setYaEnvio(true);
@@ -148,7 +150,7 @@ export default function QuinielaScreen() {
       <View style={styles.centered}>
         <Text style={styles.emptyEmoji}>🕐</Text>
         <Text style={styles.emptyTitle}>Sin partidos disponibles</Text>
-        <Text style={styles.emptyText}>El administrador aún no ha cargado los partidos de la próxima jornada.</Text>
+        <Text style={styles.emptyText}>El administrador aún no ha cargado los partidos.</Text>
       </View>
     );
   }
@@ -160,13 +162,19 @@ export default function QuinielaScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>⚽ Jornada {jornada}</Text>
         <Text style={styles.headerSub}>
-          {yaEnvio ? '✅ Quiniela enviada' : `${totalSeleccionados}/${partidos.length} seleccionados`}
+          {yaEnvio
+            ? estadoPago === 'pagado' ? '✅ Pagado — Participando' : '⏳ Pago pendiente'
+            : `${totalSeleccionados}/${partidos.length} seleccionados`}
         </Text>
       </View>
 
       {yaEnvio && (
-        <View style={styles.bannerEnviado}>
-          <Text style={styles.bannerEnviadoTexto}>🎉 Ya registraste tus pronósticos. Revisa tu estado de pago en Mi Perfil.</Text>
+        <View style={[styles.bannerEnviado, estadoPago === 'pagado' && styles.bannerPagado]}>
+          <Text style={styles.bannerTexto}>
+            {estadoPago === 'pagado'
+              ? '🎉 Pago confirmado. ¡Estás participando!'
+              : '⏳ Pronósticos guardados. Completa el pago para participar.'}
+          </Text>
         </View>
       )}
 
@@ -216,6 +224,19 @@ export default function QuinielaScreen() {
           }
         </TouchableOpacity>
       )}
+
+      {yaEnvio && estadoPago !== 'pagado' && (
+        <TouchableOpacity
+          style={styles.btnPagar}
+          onPress={confirmarYPagar}
+          disabled={loadingPago}
+        >
+          {loadingPago
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.btnPagarTexto}>💳 Reintentar pago</Text>
+          }
+        </TouchableOpacity>
+      )}
       <View style={{ height: 30 }} />
     </ScrollView>
   );
@@ -231,8 +252,9 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#1a1a2e', padding: 20, alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
   headerSub: { color: '#009ee3', fontSize: 14, marginTop: 4 },
-  bannerEnviado: { backgroundColor: '#e8f5e9', margin: 10, padding: 14, borderRadius: 10, borderLeftWidth: 4, borderLeftColor: '#4caf50' },
-  bannerEnviadoTexto: { color: '#2e7d32', fontSize: 13 },
+  bannerEnviado: { backgroundColor: '#fff3e0', margin: 10, padding: 14, borderRadius: 10, borderLeftWidth: 4, borderLeftColor: '#ff9800' },
+  bannerPagado: { backgroundColor: '#e8f5e9', borderLeftColor: '#4caf50' },
+  bannerTexto: { color: '#444', fontSize: 13 },
   card: { backgroundColor: '#fff', margin: 10, borderRadius: 12, padding: 15, elevation: 3 },
   fecha: { fontSize: 11, color: '#888', marginBottom: 8, textAlign: 'center', textTransform: 'capitalize' },
   equipos: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
