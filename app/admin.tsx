@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, ActivityIndicator, Modal, StatusBar, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Modal, StatusBar, KeyboardAvoidingView, Platform, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,44 +10,59 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { apifb } from '../lib/apiFootball';
 
-const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700' };
+const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700', purple:'#9b59b6' };
 
 type Partido  = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean; resultado_final:string|null; api_fixture_id:number|null };
 type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string; precio?:number|null };
-type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
+type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuario_id:string; monto_cobrado:number|null; usuarios:{nombre:string;username:string}|null };
 type Fixture  = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}}; goals?:{home:number|null;away:number|null} };
-type TabAdmin = 'jornadas'|'importar'|'quinielas'|'pagos';
+type TabAdmin = 'jornadas'|'importar'|'quinielas'|'ingresos';
 
-// Confirmación compatible con web y móvil
+// Confirmacion compatible web+movil
 const confirmar = (titulo: string, mensaje: string, onConfirm: () => void) => {
   if (Platform.OS === 'web') {
     if ((window as any).confirm(`${titulo}\n\n${mensaje}`)) onConfirm();
   } else {
+    const { Alert } = require('react-native');
     Alert.alert(titulo, mensaje, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Confirmar', style: 'destructive', onPress: onConfirm },
     ]);
   }
 };
-
 const avisar = (titulo: string, mensaje: string) => {
   if (Platform.OS === 'web') {
     (window as any).alert(`${titulo}\n\n${mensaje}`);
   } else {
+    const { Alert } = require('react-native');
     Alert.alert(titulo, mensaje);
   }
 };
 
 const LIGAS_POPULARES = [
-  { nombre:'FIFA World Cup',   id:'2000', temporada:'2026' },
-  { nombre:'Liga MX',         id:'2137', temporada:'2026' },
-  { nombre:'UEFA Champions',  id:'2001', temporada:'2024' },
-  { nombre:'Premier League',  id:'2021', temporada:'2024' },
-  { nombre:'La Liga',         id:'2014', temporada:'2024' },
-  { nombre:'Serie A',         id:'2019', temporada:'2024' },
-  { nombre:'Bundesliga',      id:'2002', temporada:'2024' },
-  { nombre:'MLS',             id:'2024', temporada:'2025' },
+  { nombre:'FIFA World Cup', id:'2000', temporada:'2026' },
+  { nombre:'Liga MX',        id:'2137', temporada:'2026' },
+  { nombre:'UEFA Champions', id:'2001', temporada:'2024' },
+  { nombre:'Premier League', id:'2021', temporada:'2024' },
+  { nombre:'La Liga',        id:'2014', temporada:'2024' },
+  { nombre:'Serie A',        id:'2019', temporada:'2024' },
+  { nombre:'Bundesliga',     id:'2002', temporada:'2024' },
+  { nombre:'MLS',            id:'2024', temporada:'2025' },
 ];
+
+// Mini barra de progreso para el dashboard
+function BarraIngreso({ valor, max, color }: { valor: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(valor / max, 1) : 0;
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: pct, duration: 700, useNativeDriver: false }).start();
+  }, [pct]);
+  return (
+    <View style={{ height: 6, backgroundColor: '#1e1e35', borderRadius: 3, overflow: 'hidden', marginTop: 6 }}>
+      <Animated.View style={{ height: 6, borderRadius: 3, backgroundColor: color, width: anim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }} />
+    </View>
+  );
+}
 
 export default function AdminScreen() {
   const { usuario } = useAuth();
@@ -82,7 +97,6 @@ export default function AdminScreen() {
   const [jornadaDestino, setJornadaDestino] = useState<string>('');
   const [importando, setImportando] = useState(false);
 
-  // --- Pagos ---
   const [jornadaPagoSel, setJornadaPagoSel] = useState<string|null>(null);
   const [modalPrecio, setModalPrecio] = useState(false);
   const [jornadaPrecioSel, setJornadaPrecioSel] = useState<Jornada|null>(null);
@@ -90,16 +104,16 @@ export default function AdminScreen() {
   const [savingPrecio, setSavingPrecio] = useState(false);
 
   useEffect(() => {
-    if (!usuario?.es_admin) { avisar('Acceso denegado', 'No tienes permisos de administrador.'); router.back(); return; }
+    if (!usuario?.es_admin) { avisar('Acceso denegado', 'No tienes permisos.'); router.back(); return; }
     cargarDatos();
   }, [usuario]);
 
   const cargarDatos = async () => {
     setLoading(true);
-    const [{ data:j },{ data:p },{ data:q }] = await Promise.all([
+    const [{ data:j }, { data:p }, { data:q }] = await Promise.all([
       supabase.from('jornadas').select('*').order('creado_at', { ascending:false }),
       supabase.from('partidos').select('*').order('fecha'),
-      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuario_id,usuarios(nombre,username)'),
+      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuario_id,monto_cobrado,usuarios(nombre,username)'),
     ]);
     if (j) setJornadas(j);
     if (p) setPartidos(p);
@@ -108,7 +122,7 @@ export default function AdminScreen() {
   };
 
   const crearJornada = async () => {
-    if (!nombreJornada.trim()) { avisar('Falta nombre', 'Ingresa un nombre para la jornada.'); return; }
+    if (!nombreJornada.trim()) { avisar('Falta nombre', 'Ingresa un nombre.'); return; }
     setSaving(true);
     const { error } = await supabase.from('jornadas').insert({ nombre: nombreJornada.trim(), estado: 'abierta' });
     setSaving(false);
@@ -117,85 +131,66 @@ export default function AdminScreen() {
   };
 
   const cerrarJornada = (j: Jornada) => {
-    confirmar(
-      'Cerrar jornada',
-      `¿Cerrar "${j.nombre}"? Se cerrarán todos los partidos y los usuarios ya no podrán editar.`,
-      async () => {
-        await supabase.from('jornadas').update({ estado: 'cerrada' }).eq('id', j.id);
-        await supabase.from('partidos').update({ cerrado: true }).eq('jornada_id', j.id);
-        await cargarDatos();
-        avisar('✅ Jornada cerrada', `"${j.nombre}" fue cerrada correctamente.`);
-      }
-    );
+    confirmar('Cerrar jornada', `¿Cerrar "${j.nombre}"? Los usuarios ya no podrán editar sus quinielas.`, async () => {
+      await supabase.from('jornadas').update({ estado: 'cerrada' }).eq('id', j.id);
+      await supabase.from('partidos').update({ cerrado: true }).eq('jornada_id', j.id);
+      await cargarDatos();
+      avisar('✅ Jornada cerrada', `"${j.nombre}" fue cerrada.`);
+    });
   };
 
   const finalizarJornada = (j: Jornada) => {
-    confirmar(
-      'Finalizar jornada',
-      `¿Marcar "${j.nombre}" como FINALIZADA?`,
-      async () => {
-        await supabase.from('jornadas').update({ estado: 'finalizada' }).eq('id', j.id);
-        await cargarDatos();
-      }
-    );
+    confirmar('Finalizar jornada', `¿Marcar "${j.nombre}" como FINALIZADA?`, async () => {
+      await supabase.from('jornadas').update({ estado: 'finalizada' }).eq('id', j.id);
+      await cargarDatos();
+    });
   };
 
   const borrarJornada = (j: Jornada) => {
-    confirmar(
-      '⚠️ Borrar jornada',
-      `¿Eliminar "${j.nombre}" permanentemente? Se borrarán todos sus partidos, quinielas y predicciones. Esta acción NO se puede deshacer.`,
-      async () => {
-        setBorrando(j.id);
-        try {
-          const { data: psDB } = await supabase.from('partidos').select('id').eq('jornada_id', j.id);
-          const psIds = (psDB || []).map((p: any) => p.id);
-          if (psIds.length > 0) await supabase.from('predicciones').delete().in('partido_id', psIds);
-          await supabase.from('quinielas').delete().eq('jornada_id', j.id);
-          await supabase.from('partidos').delete().eq('jornada_id', j.id);
-          await supabase.from('jornadas').delete().eq('id', j.id);
-          await cargarDatos();
-          avisar('🗑️ Jornada eliminada', `"${j.nombre}" fue eliminada correctamente.`);
-        } catch (e: any) {
-          avisar('❌ Error al borrar', e.message);
-          await cargarDatos();
-        } finally {
-          setBorrando(null);
-        }
-      }
-    );
+    confirmar('⚠️ Borrar jornada', `¿Eliminar "${j.nombre}" permanentemente? Se borrarán partidos, quinielas y predicciones. NO se puede deshacer.`, async () => {
+      setBorrando(j.id);
+      try {
+        const { data: psDB } = await supabase.from('partidos').select('id').eq('jornada_id', j.id);
+        const psIds = (psDB || []).map((p: any) => p.id);
+        if (psIds.length > 0) await supabase.from('predicciones').delete().in('partido_id', psIds);
+        await supabase.from('quinielas').delete().eq('jornada_id', j.id);
+        await supabase.from('partidos').delete().eq('jornada_id', j.id);
+        await supabase.from('jornadas').delete().eq('id', j.id);
+        await cargarDatos();
+        avisar('🗑️ Eliminada', `"${j.nombre}" fue eliminada.`);
+      } catch (e: any) {
+        avisar('❌ Error', e.message);
+        await cargarDatos();
+      } finally { setBorrando(null); }
+    });
   };
 
   const sincronizarResultados = async (j: Jornada) => {
     if (!j.api_competition_id || !j.api_season || !j.api_matchday) {
-      avisar('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.');
-      return;
+      avisar('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday.'); return;
     }
     setSyncingByJornada(prev => ({ ...prev, [j.id]: true }));
     try {
       const round = `Regular Season - ${j.api_matchday}`;
-      const data  = await apifb.fixturesPorRound(j.api_competition_id, j.api_season, round);
+      const data = await apifb.fixturesPorRound(j.api_competition_id, j.api_season, round);
       const matches: Fixture[] = data.response || [];
       if (!matches.length) { avisar('Sin datos', 'La API no devolvió partidos.'); return; }
       const ps = partidos.filter(p => p.jornada_id === j.id && p.api_fixture_id);
       let actualizados = 0;
       for (const p of ps) {
         const match = matches.find(m => m.fixture.id === p.api_fixture_id);
-        if (!match) continue;
+        if (!match || match.fixture.status.short !== 'FT') continue;
         const goals = match.goals;
         if (goals?.home == null || goals?.away == null) continue;
-        if (match.fixture.status.short !== 'FT') continue;
         const res = goals.home > goals.away ? '1' : goals.away > goals.home ? '2' : 'X';
         await supabase.from('partidos').update({ resultado_final: res, cerrado: true }).eq('id', p.id).eq('jornada_id', j.id);
         actualizados++;
       }
       if (actualizados > 0) await recalcularAciertos(j.id);
       await cargarDatos();
-      avisar('✅ Sincronizado', `${actualizados} resultado(s) actualizados en "${j.nombre}".`);
-    } catch (e) {
-      avisar('Error', String(e));
-    } finally {
-      setSyncingByJornada(prev => ({ ...prev, [j.id]: false }));
-    }
+      avisar('✅ Sincronizado', `${actualizados} resultado(s) en "${j.nombre}".`);
+    } catch (e) { avisar('Error', String(e)); }
+    finally { setSyncingByJornada(prev => ({ ...prev, [j.id]: false })); }
   };
 
   const recalcularAciertos = async (jornada_id: string) => {
@@ -235,16 +230,15 @@ export default function AdminScreen() {
 
   const importarPartidos = async () => {
     if (!seleccionados.size) { avisar('Sin selección', 'Selecciona al menos un partido.'); return; }
-    if (!jornadaDestino) { avisar('Sin jornada', 'Selecciona la jornada destino.'); return; }
+    if (!jornadaDestino) { avisar('Sin jornada', 'Selecciona jornada destino.'); return; }
     setImportando(true);
     const jDest = jornadas.find(j => j.id === jornadaDestino);
     const inserts = fixtures.filter(f => seleccionados.has(f.fixture.id)).map(f => ({
       local: f.teams.home.name, visitante: f.teams.away.name, fecha: f.fixture.date,
       jornada: 0, jornada_id: jornadaDestino, cerrado: false, api_fixture_id: f.fixture.id,
     }));
-    if (modoBusqueda === 'jornada' && jDest) {
+    if (modoBusqueda === 'jornada' && jDest)
       await supabase.from('jornadas').update({ api_competition_id: ligaId, api_season: temporada, api_matchday: roundInput }).eq('id', jornadaDestino);
-    }
     const { error } = await supabase.from('partidos').insert(inserts);
     setImportando(false);
     if (error) { avisar('Error', error.message); return; }
@@ -252,8 +246,11 @@ export default function AdminScreen() {
     setFixtures([]); setSeleccionados(new Set()); setTab('jornadas'); cargarDatos();
   };
 
-  const marcarPagado = async (qId: string) => {
-    await supabase.from('quinielas').update({ estado_pago: 'pagado' }).eq('id', qId);
+  // Al marcar pagado: guarda monto_cobrado = precio actual de la jornada
+  const marcarPagado = async (qId: string, jornadaId: string) => {
+    const jornada = jornadas.find(j => j.id === jornadaId);
+    const monto = jornada?.precio ?? 0;
+    await supabase.from('quinielas').update({ estado_pago: 'pagado', monto_cobrado: monto }).eq('id', qId);
     cargarDatos();
   };
 
@@ -265,13 +262,12 @@ export default function AdminScreen() {
   const guardarPrecio = async () => {
     if (!jornadaPrecioSel) return;
     const precio = parseFloat(precioInput.replace(',', '.'));
-    if (isNaN(precio) || precio < 0) { avisar('Precio inválido', 'Ingresa un número válido mayor o igual a 0.'); return; }
+    if (isNaN(precio) || precio < 0) { avisar('Precio inválido', 'Ingresa un número válido ≥ 0.'); return; }
     setSavingPrecio(true);
     const { error } = await supabase.from('jornadas').update({ precio }).eq('id', jornadaPrecioSel.id);
     setSavingPrecio(false);
     if (error) { avisar('Error', error.message); return; }
-    setModalPrecio(false);
-    cargarDatos();
+    setModalPrecio(false); cargarDatos();
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large" /></View>;
@@ -281,11 +277,21 @@ export default function AdminScreen() {
   const statusColor = (s: string) => s === 'FT' ? C.green : s === 'NS' ? C.textSub : C.orange;
   const estadoColor = (e: string) => e === 'abierta' ? C.green : e === 'cerrada' ? C.orange : C.textSub;
 
-  const recaudacionTotal = jornadas.reduce((sum, j) => {
-    const precio = j.precio || 0;
-    const pagadasJ = quinielas.filter(q => q.jornada_id === j.id && q.estado_pago === 'pagado').length;
-    return sum + precio * pagadasJ;
-  }, 0);
+  // Recaudacion usando monto_cobrado guardado (persiste si se borra quiniela)
+  const recaudacionTotal = quinielas
+    .filter(q => q.estado_pago === 'pagado')
+    .reduce((sum, q) => sum + (q.monto_cobrado ?? 0), 0);
+
+  // Datos de ingresos por jornada
+  const datosIngresos = jornadas.map(j => {
+    const qJ = quinielas.filter(q => q.jornada_id === j.id);
+    const pagadasJ = qJ.filter(q => q.estado_pago === 'pagado');
+    const pendientesJ = qJ.filter(q => q.estado_pago !== 'pagado');
+    const recaudadoJ = pagadasJ.reduce((s, q) => s + (q.monto_cobrado ?? 0), 0);
+    const potencial = (j.precio ?? 0) * pendientesJ.length;
+    return { j, qJ, pagadasJ, pendientesJ, recaudadoJ, potencial };
+  });
+  const maxRecaudado = Math.max(...datosIngresos.map(d => d.recaudadoJ), 1);
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -299,18 +305,32 @@ export default function AdminScreen() {
         <View style={{ width: 40 }} />
       </View>
 
+      {/* Stats globales */}
       <View style={styles.statsRow}>
-        <View style={styles.stat}><Text style={styles.statNum}>{jornadas.filter(j => j.estado === 'abierta').length}</Text><Text style={styles.statLabel}>Abiertas</Text></View>
-        <View style={styles.stat}><Text style={[styles.statNum, { color: C.green }]}>{pagados}</Text><Text style={styles.statLabel}>Pagados</Text></View>
-        <View style={styles.stat}><Text style={[styles.statNum, { color: C.orange }]}>{pendientes}</Text><Text style={styles.statLabel}>Pendientes</Text></View>
-        <View style={styles.stat}><Text style={[styles.statNum, { color: C.gold }]}>${recaudacionTotal.toFixed(0)}</Text><Text style={styles.statLabel}>Recaudado</Text></View>
+        <View style={styles.stat}>
+          <Text style={styles.statNum}>{jornadas.filter(j => j.estado === 'abierta').length}</Text>
+          <Text style={styles.statLabel}>Abiertas</Text>
+        </View>
+        <View style={styles.stat}>
+          <Text style={[styles.statNum, { color: C.green }]}>{pagados}</Text>
+          <Text style={styles.statLabel}>Pagados</Text>
+        </View>
+        <View style={styles.stat}>
+          <Text style={[styles.statNum, { color: C.orange }]}>{pendientes}</Text>
+          <Text style={styles.statLabel}>Pendientes</Text>
+        </View>
+        <View style={styles.stat}>
+          <Text style={[styles.statNum, { color: C.gold }]}>${recaudacionTotal.toFixed(0)}</Text>
+          <Text style={styles.statLabel}>Recaudado</Text>
+        </View>
       </View>
 
+      {/* Tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabsContent}>
-        {(['jornadas', 'importar', 'quinielas', 'pagos'] as TabAdmin[]).map(t => (
+        {(['jornadas', 'importar', 'quinielas', 'ingresos'] as TabAdmin[]).map(t => (
           <TouchableOpacity key={t} style={[styles.tabBtn, tab === t && styles.tabActivo]} onPress={() => setTab(t)}>
             <Text style={[styles.tabTexto, tab === t && styles.tabTextoActivo]}>
-              {t === 'jornadas' ? '📅 Jornadas' : t === 'importar' ? '📡 Importar' : t === 'quinielas' ? '📋 Quinielas' : '💰 Pagos'}
+              {t === 'jornadas' ? '📅 Jornadas' : t === 'importar' ? '📡 Importar' : t === 'quinielas' ? '📋 Quinielas' : '💰 Ingresos'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -318,14 +338,14 @@ export default function AdminScreen() {
 
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
 
-        {/* JORNADAS */}
+        {/* ── JORNADAS ── */}
         {tab === 'jornadas' && (
           <View style={{ padding: 16 }}>
             <TouchableOpacity style={styles.btnNueva} onPress={() => setModalNueva(true)} activeOpacity={0.8}>
               <Ionicons name="add-circle" size={18} color={C.accent} />
               <Text style={styles.btnNuevaTexto}>Nueva jornada</Text>
             </TouchableOpacity>
-            {jornadas.length === 0 && <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay jornadas. Crea una para empezar.</Text></View>}
+            {jornadas.length === 0 && <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay jornadas.</Text></View>}
             {jornadas.map(j => {
               const pJ = partidos.filter(p => p.jornada_id === j.id);
               const conRes = pJ.filter(p => p.resultado_final).length;
@@ -349,7 +369,6 @@ export default function AdminScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
-
                   {pJ.map(p => (
                     <View key={p.id} style={styles.partidoRow}>
                       <View style={{ flex: 1 }}>
@@ -364,12 +383,10 @@ export default function AdminScreen() {
                       }
                     </View>
                   ))}
-
                   <View style={styles.jornadaAcciones}>
                     {isOpen && (
                       <TouchableOpacity style={[styles.accionBtn, { backgroundColor: C.orange }]} onPress={() => cerrarJornada(j)}>
-                        <Ionicons name="lock-closed" size={13} color="#fff" />
-                        <Text style={styles.accionTexto}>Cerrar todo</Text>
+                        <Ionicons name="lock-closed" size={13} color="#fff" /><Text style={styles.accionTexto}>Cerrar todo</Text>
                       </TouchableOpacity>
                     )}
                     {(isOpen || isCerrada) && j.api_competition_id && (
@@ -379,8 +396,7 @@ export default function AdminScreen() {
                     )}
                     {isCerrada && (
                       <TouchableOpacity style={[styles.accionBtn, { backgroundColor: C.green }]} onPress={() => finalizarJornada(j)}>
-                        <Ionicons name="checkmark-done" size={13} color="#fff" />
-                        <Text style={styles.accionTexto}>Finalizar</Text>
+                        <Ionicons name="checkmark-done" size={13} color="#fff" /><Text style={styles.accionTexto}>Finalizar</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -390,7 +406,7 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* IMPORTAR */}
+        {/* ── IMPORTAR ── */}
         {tab === 'importar' && (
           <View style={{ padding: 16 }}>
             <View style={styles.seccionCard}>
@@ -455,7 +471,6 @@ export default function AdminScreen() {
             {seleccionados.size > 0 && (
               <View style={styles.seccionCard}>
                 <Text style={styles.seccionTitulo}>📦 Asignar a jornada</Text>
-                <Text style={styles.label}>Selecciona la jornada destino</Text>
                 {jornadas.filter(j => j.estado === 'abierta').length === 0
                   ? <Text style={{ color: C.red, fontSize: 13, marginBottom: 8 }}>⚠️ No hay jornadas abiertas.</Text>
                   : jornadas.filter(j => j.estado === 'abierta').map(j => (
@@ -473,11 +488,11 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* QUINIELAS */}
+        {/* ── QUINIELAS ── */}
         {tab === 'quinielas' && (
           <View style={{ padding: 16 }}>
             {quinielas.length === 0
-              ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas.</Text></View>
+              ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas.</Text></View>
               : quinielas.map(q => {
                 const j = jornadas.find(jj => jj.id === q.jornada_id);
                 return (
@@ -487,12 +502,15 @@ export default function AdminScreen() {
                         <Text style={styles.cardUser}>{(q.usuarios as any)?.username ? `@${(q.usuarios as any).username}` : (q.usuarios as any)?.nombre || 'Usuario'}</Text>
                         <Text style={styles.cardJornada}>{j?.nombre || 'Jornada desconocida'}</Text>
                         {q.codigo && <Text style={styles.cardCodigo}>🎫 {q.codigo}</Text>}
+                        {q.monto_cobrado != null && q.monto_cobrado > 0 && (
+                          <Text style={{ color: C.gold, fontSize: 11, marginTop: 2 }}>💵 ${q.monto_cobrado} cobrado</Text>
+                        )}
                         <Text style={[styles.cardEstado, q.estado_pago === 'pagado' ? styles.estadoPagado : styles.estadoPendiente]}>
                           {q.estado_pago === 'pagado' ? '✅ Pagado' : '⏳ Pendiente'}
                         </Text>
                       </View>
                       {q.estado_pago !== 'pagado'
-                        ? <TouchableOpacity onPress={() => marcarPagado(q.id)} style={[styles.actionBtn, { backgroundColor: C.accent }]}>
+                        ? <TouchableOpacity onPress={() => marcarPagado(q.id, q.jornada_id)} style={[styles.actionBtn, { backgroundColor: C.accent }]}>
                           <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
                         </TouchableOpacity>
                         : <View style={[styles.actionBtn, { backgroundColor: 'rgba(0,200,151,0.15)', borderWidth: 1, borderColor: C.green }]}>
@@ -507,75 +525,94 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* PAGOS */}
-        {tab === 'pagos' && (
+        {/* ── INGRESOS (nuevo dashboard) ── */}
+        {tab === 'ingresos' && (
           <View style={{ padding: 16 }}>
-            <View style={styles.seccionCard}>
-              <Text style={styles.seccionTitulo}>📊 Resumen global</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={styles.resumenLabel}>Total quinielas</Text>
-                <Text style={styles.resumenVal}>{quinielas.length}</Text>
+
+            {/* Tarjetas resumen */}
+            <View style={styles.ingresosResumenRow}>
+              <View style={[styles.ingresosCard, { borderColor: C.gold }]}>
+                <Text style={styles.ingresosCardIcono}>💵</Text>
+                <Text style={[styles.ingresosCardNum, { color: C.gold }]}>${recaudacionTotal.toFixed(2)}</Text>
+                <Text style={styles.ingresosCardLabel}>Total cobrado</Text>
               </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={styles.resumenLabel}>✅ Pagadas</Text>
-                <Text style={[styles.resumenVal, { color: C.green }]}>{pagados}</Text>
+              <View style={[styles.ingresosCard, { borderColor: C.green }]}>
+                <Text style={styles.ingresosCardIcono}>✅</Text>
+                <Text style={[styles.ingresosCardNum, { color: C.green }]}>{pagados}</Text>
+                <Text style={styles.ingresosCardLabel}>Pagos recibidos</Text>
               </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={styles.resumenLabel}>⏳ Pendientes</Text>
-                <Text style={[styles.resumenVal, { color: C.orange }]}>{pendientes}</Text>
-              </View>
-              <View style={[styles.separador, { marginVertical: 10 }]} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={[styles.resumenLabel, { fontWeight: '700', color: C.text }]}>💵 Total recaudado</Text>
-                <Text style={[styles.resumenVal, { color: C.gold, fontSize: 18, fontWeight: '800' }]}>${recaudacionTotal.toFixed(2)}</Text>
+              <View style={[styles.ingresosCard, { borderColor: C.orange }]}>
+                <Text style={styles.ingresosCardIcono}>⏳</Text>
+                <Text style={[styles.ingresosCardNum, { color: C.orange }]}>{pendientes}</Text>
+                <Text style={styles.ingresosCardLabel}>Pendientes</Text>
               </View>
             </View>
 
-            {jornadas.map(j => {
-              const qJ = quinielas.filter(q => q.jornada_id === j.id);
-              const pagadasJ = qJ.filter(q => q.estado_pago === 'pagado');
-              const pendientesJ = qJ.filter(q => q.estado_pago !== 'pagado');
-              const precio = j.precio || 0;
-              const recaudadoJ = precio * pagadasJ.length;
+            {/* Potencial pendiente */}
+            {(() => {
+              const potTotal = datosIngresos.reduce((s, d) => s + d.potencial, 0);
+              return potTotal > 0 ? (
+                <View style={[styles.potencialBanner]}>
+                  <Ionicons name="trending-up" size={16} color={C.orange} />
+                  <Text style={styles.potencialTexto}>Potencial pendiente: <Text style={{ color: C.orange, fontWeight: '800' }}>${potTotal.toFixed(2)}</Text></Text>
+                </View>
+              ) : null;
+            })()}
+
+            {/* Por jornada */}
+            <Text style={[styles.seccionTitulo, { marginBottom: 10, paddingHorizontal: 4 }]}>📊 Ingresos por jornada</Text>
+            {datosIngresos.map(({ j, pagadasJ, pendientesJ, recaudadoJ, potencial }) => {
+              const precio = j.precio ?? 0;
               const isOpen = jornadaPagoSel === j.id;
               return (
-                <View key={j.id} style={styles.pagoJornadaCard}>
-                  <TouchableOpacity style={styles.pagoJornadaHeader} onPress={() => setJornadaPagoSel(isOpen ? null : j.id)} activeOpacity={0.8}>
+                <View key={j.id} style={styles.ingresoJornadaCard}>
+                  {/* Cabecera */}
+                  <TouchableOpacity style={styles.ingresoJornadaHeader} onPress={() => setJornadaPagoSel(isOpen ? null : j.id)} activeOpacity={0.8}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.jornadaNombre}>{j.nombre}</Text>
-                      <Text style={styles.jornadaInfo}>
-                        {pagadasJ.length} pagadas · {pendientesJ.length} pendientes
-                        {precio > 0 ? ` · $${recaudadoJ.toFixed(2)} recaudados` : ''}
-                      </Text>
+                      <Text style={styles.jornadaInfo}>{pagadasJ.length} pagadas · {pendientesJ.length} pendientes</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      {precio > 0
-                        ? <View style={styles.precioBadge}><Text style={styles.precioTexto}>${precio}/c</Text></View>
-                        : <View style={[styles.precioBadge, { borderColor: C.orange }]}><Text style={[styles.precioTexto, { color: C.orange }]}>Sin precio</Text></View>
-                      }
-                      <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color={C.textSub} />
+                      <Text style={[styles.ingresoBig, { color: recaudadoJ > 0 ? C.gold : C.textSub }]}>
+                        ${recaudadoJ.toFixed(2)}
+                      </Text>
+                      {precio > 0 && <Text style={styles.precioPorQuiniela}>${precio}/c</Text>}
                     </View>
+                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color={C.textSub} style={{ marginLeft: 8 }} />
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.btnConfPrecio} onPress={() => { setJornadaPrecioSel(j); setPrecioInput(precio > 0 ? String(precio) : ''); setModalPrecio(true); }} activeOpacity={0.8}>
+                  {/* Barra de progreso */}
+                  <BarraIngreso valor={recaudadoJ} max={maxRecaudado} color={recaudadoJ > 0 ? C.gold : '#2a2a40'} />
+
+                  {/* Botón precio */}
+                  <TouchableOpacity
+                    style={styles.btnConfPrecio}
+                    onPress={() => { setJornadaPrecioSel(j); setPrecioInput(precio > 0 ? String(precio) : ''); setModalPrecio(true); }}
+                    activeOpacity={0.8}
+                  >
                     <Ionicons name="pricetag-outline" size={13} color={C.accent} />
-                    <Text style={styles.btnConfPrecioTexto}>{precio > 0 ? 'Cambiar precio' : 'Configurar precio'}</Text>
+                    <Text style={styles.btnConfPrecioTexto}>{precio > 0 ? `Precio: $${precio} — cambiar` : 'Configurar precio'}</Text>
                   </TouchableOpacity>
 
+                  {/* Lista expandible */}
                   {isOpen && (
-                    <View style={{ marginTop: 8 }}>
+                    <View style={{ marginTop: 10 }}>
                       <View style={styles.separador} />
-                      {qJ.length === 0 && <Text style={[styles.emptyText, { marginTop: 10 }]}>Sin quinielas en esta jornada</Text>}
+                      {(pagadasJ.length + pendientesJ.length) === 0 && (
+                        <Text style={[styles.emptyText, { marginTop: 10, textAlign: 'center' }]}>Sin quinielas en esta jornada</Text>
+                      )}
+
+                      {/* Pendientes */}
                       {pendientesJ.length > 0 && (
-                        <View style={{ marginTop: 8 }}>
-                          <Text style={[styles.grupoLabel, { color: C.orange }]}>⏳ Pendientes ({pendientesJ.length})</Text>
+                        <View style={{ marginTop: 10 }}>
+                          <Text style={[styles.grupoLabel, { color: C.orange }]}>⏳ Pendientes ({pendientesJ.length}){precio > 0 ? ` · Potencial: $${potencial.toFixed(2)}` : ''}</Text>
                           {pendientesJ.map(q => (
                             <View key={q.id} style={styles.pagoRow}>
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.pagoUser}>{(q.usuarios as any)?.username ? `@${(q.usuarios as any).username}` : (q.usuarios as any)?.nombre || 'Usuario'}</Text>
                                 {q.codigo && <Text style={styles.pagoCodigo}>🎫 {q.codigo}</Text>}
                               </View>
-                              <TouchableOpacity style={styles.btnPagarChico} onPress={() => marcarPagado(q.id)}>
+                              <TouchableOpacity style={styles.btnPagarChico} onPress={() => marcarPagado(q.id, j.id)}>
                                 <Ionicons name="checkmark" size={14} color="#fff" />
                                 <Text style={styles.btnPagarChicoTexto}>Pagado</Text>
                               </TouchableOpacity>
@@ -583,14 +620,17 @@ export default function AdminScreen() {
                           ))}
                         </View>
                       )}
+
+                      {/* Pagadas */}
                       {pagadasJ.length > 0 && (
-                        <View style={{ marginTop: 8 }}>
-                          <Text style={[styles.grupoLabel, { color: C.green }]}>✅ Pagadas ({pagadasJ.length}){precio > 0 ? ` · $${recaudadoJ.toFixed(2)}` : ''}</Text>
+                        <View style={{ marginTop: 10 }}>
+                          <Text style={[styles.grupoLabel, { color: C.green }]}>✅ Pagadas ({pagadasJ.length}) · ${recaudadoJ.toFixed(2)}</Text>
                           {pagadasJ.map(q => (
-                            <View key={q.id} style={[styles.pagoRow, { opacity: 0.8 }]}>
+                            <View key={q.id} style={[styles.pagoRow, { opacity: 0.85 }]}>
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.pagoUser}>{(q.usuarios as any)?.username ? `@${(q.usuarios as any).username}` : (q.usuarios as any)?.nombre || 'Usuario'}</Text>
                                 {q.codigo && <Text style={styles.pagoCodigo}>🎫 {q.codigo}</Text>}
+                                {q.monto_cobrado != null && <Text style={{ color: C.gold, fontSize: 11, marginTop: 1 }}>💵 ${q.monto_cobrado}</Text>}
                               </View>
                               <TouchableOpacity style={[styles.btnPagarChico, { backgroundColor: 'rgba(255,159,67,0.15)', borderColor: C.orange, borderWidth: 1 }]} onPress={() => marcarPendiente(q.id)}>
                                 <Text style={[styles.btnPagarChicoTexto, { color: C.orange }]}>Revertir</Text>
@@ -662,7 +702,7 @@ export default function AdminScreen() {
               <Text style={styles.modalSubtitulo}>{jornadaPrecioSel?.nombre}</Text>
               <Text style={styles.label}>Precio por quiniela (MXN)</Text>
               <TextInput style={styles.input} value={precioInput} onChangeText={setPrecioInput} keyboardType="decimal-pad" placeholder="Ej: 50" placeholderTextColor="#555577" autoFocus />
-              <Text style={{ color: C.textSub, fontSize: 11, marginBottom: 12 }}>Este precio se usará en Mercado Pago al momento del cobro.</Text>
+              <Text style={{ color: C.textSub, fontSize: 11, marginBottom: 12 }}>Este precio se enviará a Mercado Pago al cobrar.</Text>
               <View style={styles.modalBtns}>
                 <TouchableOpacity style={styles.btnCancelar} onPress={() => setModalPrecio(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
                 <TouchableOpacity style={[styles.btnGuardar, savingPrecio && { opacity: 0.6 }]} onPress={guardarPrecio} disabled={savingPrecio}>
@@ -740,19 +780,26 @@ const styles = StyleSheet.create({
   estadoPagado: { color: C.green }, estadoPendiente: { color: C.orange },
   actionBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
   actionBtnTexto: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  resumenLabel: { color: C.textSub, fontSize: 13 }, resumenVal: { color: C.text, fontSize: 13, fontWeight: '700' },
+  // Ingresos dashboard
+  ingresosResumenRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  ingresosCard: { flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1.5, gap: 4 },
+  ingresosCardIcono: { fontSize: 22 },
+  ingresosCardNum: { fontSize: 18, fontWeight: '900', color: C.text },
+  ingresosCardLabel: { color: C.textSub, fontSize: 10, textAlign: 'center', fontWeight: '600' },
+  potencialBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,159,67,0.1)', borderWidth: 1, borderColor: 'rgba(255,159,67,0.3)', borderRadius: 10, padding: 12, marginBottom: 14 },
+  potencialTexto: { color: C.textSub, fontSize: 13 },
+  ingresoJornadaCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.cardBorder },
+  ingresoJornadaHeader: { flexDirection: 'row', alignItems: 'center' },
+  ingresoBig: { fontSize: 18, fontWeight: '900' },
+  precioPorQuiniela: { color: C.textSub, fontSize: 10 },
   separador: { height: 1, backgroundColor: C.cardBorder },
-  pagoJornadaCard: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.cardBorder },
-  pagoJornadaHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
-  precioBadge: { borderWidth: 1.5, borderColor: C.accent, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  precioTexto: { color: C.accent, fontSize: 10, fontWeight: '800' },
-  btnConfPrecio: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: C.accent, alignSelf: 'flex-start', backgroundColor: C.accentDim, marginBottom: 4 },
-  btnConfPrecioTexto: { color: C.accent, fontSize: 12, fontWeight: '700' },
   grupoLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   pagoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.cardBorder },
   pagoUser: { color: C.text, fontSize: 13, fontWeight: '600' }, pagoCodigo: { color: C.textSub, fontSize: 11, marginTop: 1 },
   btnPagarChico: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.green, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   btnPagarChicoTexto: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  btnConfPrecio: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: C.accent, alignSelf: 'flex-start', backgroundColor: C.accentDim, marginTop: 10, marginBottom: 4 },
+  btnConfPrecioTexto: { color: C.accent, fontSize: 12, fontWeight: '700' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 34, borderTopWidth: 1, borderColor: C.cardBorder },
   modalTitulo: { fontSize: 18, fontWeight: 'bold', color: C.text, marginBottom: 4 }, modalSubtitulo: { fontSize: 13, color: C.textSub, marginBottom: 16 },
@@ -763,4 +810,5 @@ const styles = StyleSheet.create({
   modalBtns: { flexDirection: 'row', gap: 10 },
   btnCancelar: { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: C.cardBorder, alignItems: 'center' }, btnCancelarTexto: { color: C.textSub, fontWeight: '600' },
   btnGuardar: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: C.accent, alignItems: 'center' }, btnGuardarTexto: { color: '#fff', fontWeight: 'bold' },
+  resumenLabel: { color: C.textSub, fontSize: 13 }, resumenVal: { color: C.text, fontSize: 13, fontWeight: '700' },
 });
