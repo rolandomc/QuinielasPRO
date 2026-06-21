@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, ActivityIndicator, RefreshControl, StatusBar, Platform,
+  Alert, ActivityIndicator, RefreshControl, StatusBar, Platform, Animated,
 } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,10 +9,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
-const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b' };
+const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700' };
 
 type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
-type Jornada    = { id:string; nombre:string; estado:string };
+type Jornada    = { id:string; nombre:string; estado:string; precio?:number|null };
 type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
 type Resultado  = '1'|'X'|'2';
 
@@ -36,7 +36,7 @@ function useCountdown(fechaISO: string) {
 function Countdown({ fecha }: { fecha: string }) {
   const { total, d, h, m, s } = useCountdown(fecha);
   if (total <= 0) return null;
-  const urgente = total < 3600000; // menos de 1 hora
+  const urgente = total < 3600000;
   const texto = d > 0
     ? `Inicia en ${d}d ${h}h ${m}m`
     : h > 0
@@ -56,6 +56,60 @@ const cdStyles = StyleSheet.create({
   texto: { color:C.accent, fontSize:11, fontWeight:'700' },
   textoUrgente: { color:C.orange },
 });
+
+// ── Confetti ──────────────────────────────────────────────────────
+const COLORES_CONFETTI = ['#00b4d8','#00c897','#ffd700','#ff9f43','#ff6b6b','#9b59b6','#f0f0ff'];
+const N_CONFETTI = 22;
+
+function ConfettiPieza({ delay, color }: { delay: number; color: string }) {
+  const y    = useRef(new Animated.Value(-20)).current;
+  const x    = useRef(new Animated.Value(0)).current;
+  const op   = useRef(new Animated.Value(1)).current;
+  const rot  = useRef(new Animated.Value(0)).current;
+  const startX = (Math.random() - 0.5) * 320;
+  const endX   = startX + (Math.random() - 0.5) * 100;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(y,   { toValue: 580, duration: 1800, useNativeDriver: true }),
+        Animated.timing(x,   { toValue: endX - startX, duration: 1800, useNativeDriver: true }),
+        Animated.timing(op,  { toValue: 0, duration: 1800, delay: 1000, useNativeDriver: true }),
+        Animated.timing(rot, { toValue: 8, duration: 1800, useNativeDriver: true }),
+      ]).start();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
+  const rotate = rot.interpolate({ inputRange: [0, 8], outputRange: ['0deg', '720deg'] });
+  return (
+    <Animated.View style={[
+      confettiStyles.pieza,
+      { backgroundColor: color, opacity: op,
+        transform: [{ translateY: y }, { translateX: x }, { rotate }],
+        left: '50%', marginLeft: startX,
+      },
+    ]} />
+  );
+}
+
+function Confetti({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <View style={confettiStyles.container} pointerEvents="none">
+      {Array.from({ length: N_CONFETTI }).map((_, i) => (
+        <ConfettiPieza
+          key={i}
+          delay={Math.random() * 400}
+          color={COLORES_CONFETTI[i % COLORES_CONFETTI.length]}
+        />
+      ))}
+    </View>
+  );
+}
+
+const confettiStyles = StyleSheet.create({
+  container: { ...StyleSheet.absoluteFillObject, zIndex: 999, pointerEvents: 'none' },
+  pieza: { position: 'absolute', top: 0, width: 10, height: 10, borderRadius: 2 },
+});
 // ─────────────────────────────────────────────────────────────────
 
 export default function QuinielaScreen() {
@@ -69,11 +123,15 @@ export default function QuinielaScreen() {
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
   const [loadingPago, setLoadingPago]   = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  // Para detectar pago recién confirmado
+  const prevEstadoRef = useRef<string|null>(null);
+  const [pagoRecienConfirmado, setPagoRecienConfirmado] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!user) return;
     const { data: jData } = await supabase
-      .from('jornadas').select('id,nombre,estado').eq('estado','abierta')
+      .from('jornadas').select('id,nombre,estado,precio').eq('estado','abierta')
       .order('creado_at', { ascending: false }).limit(1).maybeSingle();
     if (!jData) { setJornada(null); setPartidos([]); setQuiniela(null); return; }
     setJornada(jData);
@@ -83,7 +141,17 @@ export default function QuinielaScreen() {
     const { data: qData } = await supabase
       .from('quinielas').select('id,estado_pago,jornada_id')
       .eq('usuario_id', user.id).eq('jornada_id', jData.id).maybeSingle();
+
+    // Detectar si el pago fue recién confirmado por el admin
+    if (qData && prevEstadoRef.current === 'pendiente' && qData.estado_pago === 'pagado') {
+      setPagoRecienConfirmado(true);
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 2500);
+      setTimeout(() => setPagoRecienConfirmado(false), 6000);
+    }
+    prevEstadoRef.current = qData?.estado_pago ?? null;
     setQuiniela(qData);
+
     if (qData && pData) {
       const { data: predData } = await supabase
         .from('predicciones').select('partido_id,resultado')
@@ -94,12 +162,26 @@ export default function QuinielaScreen() {
     } else { setPredicciones({}); }
   }, [user]);
 
-  useEffect(() => { setLoading(true); cargar().finally(() => setLoading(false)); }, [cargar]);
+  // Polling cada 30s para detectar pago confirmado por admin
+  useEffect(() => {
+    setLoading(true);
+    cargar().finally(() => setLoading(false));
+    const interval = setInterval(() => cargar(), 30000);
+    return () => clearInterval(interval);
+  }, [cargar]);
+
   const onRefresh = useCallback(async () => { setRefreshing(true); await cargar(); setRefreshing(false); }, [cargar]);
 
   const seleccionar = (id: string, r: Resultado) => {
     if (quiniela) return;
-    setPredicciones(p => ({ ...p, [id]: r }));
+    const nuevas = { ...predicciones, [id]: r };
+    setPredicciones(nuevas);
+    // Mostrar confetti si se completan todas las predicciones
+    const todas = partidos.every(p => nuevas[p.id]);
+    if (todas && !showConfetti) {
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 2200);
+    }
   };
 
   const confirmarYPagar = async () => {
@@ -145,6 +227,10 @@ export default function QuinielaScreen() {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+
+      {/* Confetti overlay */}
+      <Confetti visible={showConfetti} />
+
       <ScrollView
         style={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]}/>}
@@ -155,6 +241,12 @@ export default function QuinielaScreen() {
           {jornada && (
             <View style={styles.jornadaBadge}>
               <Text style={styles.jornadaBadgeText}>{jornada.nombre}</Text>
+            </View>
+          )}
+          {jornada?.precio != null && jornada.precio > 0 && (
+            <View style={styles.precioBadge}>
+              <Ionicons name="pricetag" size={11} color={C.gold} />
+              <Text style={styles.precioTexto}>${jornada.precio} por quiniela</Text>
             </View>
           )}
         </View>
@@ -177,7 +269,19 @@ export default function QuinielaScreen() {
 
         {jornada && partidos.length > 0 && (
           <>
-            {yaGuardo && (
+            {/* Banner pago recién confirmado */}
+            {pagoRecienConfirmado && (
+              <View style={styles.bannerPagoConfirmado}>
+                <Text style={styles.bannerPagoEmoji}>🎉</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.bannerPagoTitulo}>¡Tu pago fue confirmado!</Text>
+                  <Text style={styles.bannerPagoSub}>Ya estás participando en {jornada.nombre}</Text>
+                </View>
+                <Ionicons name="checkmark-circle" size={22} color={C.green} />
+              </View>
+            )}
+
+            {yaGuardo && !pagoRecienConfirmado && (
               <View style={[styles.statusBanner, esPagado ? styles.bannerGreen : styles.bannerOrange]}>
                 <Ionicons name={esPagado ? 'checkmark-circle' : 'time-outline'} size={18} color="#fff"/>
                 <Text style={styles.statusText}>
@@ -195,13 +299,15 @@ export default function QuinielaScreen() {
                 <View style={styles.progressBar}>
                   <View style={[styles.progressFill, { width: `${selCount / partidos.length * 100}%` as any }]}/>
                 </View>
+                {todoSel && (
+                  <Text style={styles.completoTexto}>✨ ¡Quiniela completa! Ya puedes confirmar y pagar.</Text>
+                )}
               </View>
             )}
 
             {partidos.map(p => (
               <View key={p.id} style={styles.partidoCard}>
                 <Text style={styles.partidoFecha}>{formatFecha(p.fecha)}</Text>
-                {/* ── Conteo regresivo ── */}
                 <Countdown fecha={p.fecha} />
                 <View style={styles.equiposRow}>
                   <Text style={styles.equipo} numberOfLines={1}>{p.local}</Text>
@@ -232,14 +338,17 @@ export default function QuinielaScreen() {
 
             {!esPagado && (
               <TouchableOpacity
-                style={[styles.btnPagar, (!todoSel && !yaGuardo) && styles.btnDisabled]}
+                style={[styles.btnPagar, todoSel ? styles.btnPagarActivo : styles.btnDisabled]}
                 onPress={confirmarYPagar}
                 disabled={loadingPago || (!todoSel && !yaGuardo)}
                 activeOpacity={0.8}
               >
                 {loadingPago
                   ? <ActivityIndicator color="#fff"/>
-                  : <Text style={styles.btnPagarTexto}>{yaGuardo ? '💳 Reintentar pago' : '💳 Confirmar y pagar'}</Text>
+                  : <>
+                    <Ionicons name="card" size={18} color="#fff" />
+                    <Text style={styles.btnPagarTexto}>{yaGuardo ? 'Reintentar pago' : 'Confirmar y pagar'}</Text>
+                  </>
                 }
               </TouchableOpacity>
             )}
@@ -252,12 +361,23 @@ export default function QuinielaScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg}, center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg}, scroll:{flex:1},
+  root:{flex:1,backgroundColor:C.bg},
+  center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
+  scroll:{flex:1},
   header:{paddingBottom:20,paddingHorizontal:20,backgroundColor:C.bg},
   headerTitle:{color:C.text,fontSize:28,fontWeight:'bold'},
   jornadaBadge:{marginTop:6,alignSelf:'flex-start',backgroundColor:C.accentDim,paddingHorizontal:12,paddingVertical:4,borderRadius:20},
   jornadaBadgeText:{color:C.accent,fontSize:13,fontWeight:'700'},
-  emptyBox:{alignItems:'center',padding:60}, emptyEmoji:{fontSize:54,marginBottom:16},
+  precioBadge:{flexDirection:'row',alignItems:'center',gap:4,marginTop:5,alignSelf:'flex-start',backgroundColor:'rgba(255,215,0,0.08)',borderWidth:1,borderColor:'rgba(255,215,0,0.25)',paddingHorizontal:10,paddingVertical:3,borderRadius:20},
+  precioTexto:{color:C.gold,fontSize:12,fontWeight:'700'},
+  // Banner pago confirmado
+  bannerPagoConfirmado:{flexDirection:'row',alignItems:'center',gap:10,marginHorizontal:16,marginBottom:12,padding:16,borderRadius:14,backgroundColor:'rgba(0,200,151,0.12)',borderWidth:1.5,borderColor:C.green},
+  bannerPagoEmoji:{fontSize:28},
+  bannerPagoTitulo:{color:C.green,fontWeight:'800',fontSize:15},
+  bannerPagoSub:{color:C.textSub,fontSize:12,marginTop:2},
+  //
+  emptyBox:{alignItems:'center',padding:60},
+  emptyEmoji:{fontSize:54,marginBottom:16},
   emptyTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:8},
   emptyTexto:{color:C.textSub,fontSize:14,textAlign:'center',lineHeight:22},
   statusBanner:{flexDirection:'row',alignItems:'center',gap:10,marginHorizontal:16,marginBottom:12,padding:14,borderRadius:12},
@@ -266,8 +386,11 @@ const styles = StyleSheet.create({
   statusText:{color:C.text,fontWeight:'600',fontSize:13,flex:1},
   progressBox:{marginHorizontal:16,marginBottom:12,backgroundColor:C.card,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
   progressRow:{flexDirection:'row',justifyContent:'space-between',marginBottom:8},
-  progressLabel:{color:C.textSub,fontSize:13}, progressPct:{color:C.accent,fontSize:13,fontWeight:'700'},
-  progressBar:{height:4,backgroundColor:'#1e1e35',borderRadius:2}, progressFill:{height:4,backgroundColor:C.accent,borderRadius:2},
+  progressLabel:{color:C.textSub,fontSize:13},
+  progressPct:{color:C.accent,fontSize:13,fontWeight:'700'},
+  progressBar:{height:4,backgroundColor:'#1e1e35',borderRadius:2},
+  progressFill:{height:4,backgroundColor:C.accent,borderRadius:2},
+  completoTexto:{color:C.green,fontSize:12,fontWeight:'700',marginTop:8,textAlign:'center'},
   partidoCard:{backgroundColor:C.card,marginHorizontal:16,marginBottom:10,borderRadius:14,padding:16,borderWidth:1,borderColor:C.cardBorder},
   partidoFecha:{color:C.accent,fontSize:12,fontWeight:'600',marginBottom:4,textAlign:'center'},
   equiposRow:{flexDirection:'row',alignItems:'center',marginBottom:14,marginTop:8},
@@ -277,9 +400,12 @@ const styles = StyleSheet.create({
   opcionesRow:{flexDirection:'row',gap:8},
   opcion:{flex:1,borderWidth:1.5,borderColor:'#2a2a40',borderRadius:10,paddingVertical:10,alignItems:'center',backgroundColor:'#12121f'},
   opcionActiva:{backgroundColor:C.accentDim,borderColor:C.accent},
-  opcionLetra:{fontSize:17,fontWeight:'bold',color:C.textSub}, opcionLetraActiva:{color:C.accent},
-  opcionEquipo:{fontSize:11,color:'#555577',marginTop:3}, opcionEquipoActivo:{color:C.accent},
-  btnPagar:{alignItems:'center',justifyContent:'center',backgroundColor:'#1a1a2e',marginHorizontal:16,marginTop:8,padding:17,borderRadius:14},
-  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.6},
+  opcionLetra:{fontSize:17,fontWeight:'bold',color:C.textSub},
+  opcionLetraActiva:{color:C.accent},
+  opcionEquipo:{fontSize:11,color:'#555577',marginTop:3},
+  opcionEquipoActivo:{color:C.accent},
+  btnPagar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,marginHorizontal:16,marginTop:8,padding:17,borderRadius:14,backgroundColor:'#1a1a2e'},
+  btnPagarActivo:{backgroundColor:C.accent},
+  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.5},
   btnPagarTexto:{color:'#fff',fontWeight:'bold',fontSize:16},
 });
