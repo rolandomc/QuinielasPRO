@@ -29,6 +29,17 @@ serve(async (req) => {
     const appUrl = Deno.env.get('APP_URL') ?? 'https://quinielapro.app'
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
 
+    const { data: jornadaData, error: jornadaError } = await supabaseClient
+      .from('jornadas')
+      .select('precio,nombre')
+      .eq('id', jornada_id)
+      .single()
+
+    if (jornadaError) throw new Error('Error leyendo jornada: ' + jornadaError.message)
+
+    const precio = Number(jornadaData?.precio ?? 100)
+    const nombreJornada = jornada_nombre || jornadaData?.nombre || jornada_id
+
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
       headers: {
@@ -36,7 +47,7 @@ serve(async (req) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        items: [{ title: `Quiniela Pro — ${jornada_nombre || jornada_id}`, quantity: 1, currency_id: 'MXN', unit_price: 100.00 }],
+        items: [{ title: `Quiniela Pro — ${nombreJornada}`, quantity: 1, currency_id: 'MXN', unit_price: precio }],
         payer: { name: nombre, email: user.email },
         back_urls: {
           success: `${appUrl}/pago/exito`,
@@ -50,13 +61,12 @@ serve(async (req) => {
     })
 
     const mpData = await mpResponse.json()
-    console.log('MP preference creada:', JSON.stringify({ id: mpData.id }))
+    console.log('MP preference creada:', JSON.stringify({ id: mpData.id, precio }))
     if (!mpData.id) throw new Error('MP Error: ' + JSON.stringify(mpData))
 
-    // Producción: siempre usar init_point (no sandbox_init_point)
     const urlPago = mpData.init_point
 
-    return new Response(JSON.stringify({ urlPago }), {
+    return new Response(JSON.stringify({ urlPago, precio }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
