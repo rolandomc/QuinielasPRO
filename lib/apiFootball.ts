@@ -11,20 +11,12 @@ async function call(endpoint: string, params: Record<string, string> = {}) {
   return res.json();
 }
 
-export function mejorTemporada(seasons: { year: number; current: boolean }[]): string {
-  if (!seasons?.length) return String(new Date().getFullYear());
-  const current = seasons.find(s => s.current);
-  if (current) return String(current.year);
-  return String([...seasons].sort((a, b) => b.year - a.year)[0].year);
-}
-
 export const apifb = {
   ligas: (search: string) => call('leagues', { search }),
   fixtures: (leagueId: string, season: string, date: string) =>
     call('fixtures', { league: leagueId, season, date }),
   fixturesPorSemana: (leagueId: string, season: string, from: string, to: string) =>
     call('fixtures', { league: leagueId, season, from, to }),
-  // Busca por round exacto: "Regular Season - 1"
   fixturesPorRound: (leagueId: string, season: string, round: string) =>
     call('fixtures', { league: leagueId, season, round }),
   fixturesEnVivo: (leagueId: string) =>
