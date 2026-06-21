@@ -1,275 +1,170 @@
 import React, { useEffect, useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, Modal,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, StatusBar } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
-type Partido = {
-  id: string;
-  local: string;
-  visitante: string;
-  fecha: string;
-  jornada: number;
-  cerrado: boolean;
-  resultado_final: string | null;
-};
+const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b' };
 
-type Quiniela = {
-  id: string;
-  jornada: number;
-  estado_pago: string;
-  usuario_id: string;
-  usuarios: { nombre: string } | null;
-};
+type Partido = { id:string; local:string; visitante:string; fecha:string; jornada:number; cerrado:boolean; resultado_final:string|null };
+type Quiniela = { id:string; jornada:number; estado_pago:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
 
 export default function AdminScreen() {
   const { usuario } = useAuth();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [tab, setTab] = useState<'partidos' | 'quinielas'>('partidos');
+  const [tab, setTab] = useState<'partidos'|'quinielas'>('partidos');
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalPartido, setModalPartido] = useState(false);
   const [modalResultado, setModalResultado] = useState(false);
-  const [partidoSeleccionado, setPartidoSeleccionado] = useState<Partido | null>(null);
-  const [resultadoInput, setResultadoInput] = useState<'1' | 'X' | '2' | null>(null);
+  const [partidoSel, setPartidoSel] = useState<Partido|null>(null);
+  const [resultadoInput, setResultadoInput] = useState<'1'|'X'|'2'|null>(null);
   const [saving, setSaving] = useState(false);
-
-  const [local, setLocal] = useState('');
-  const [visitante, setVisitante] = useState('');
-  const [fecha, setFecha] = useState('');
-  const [hora, setHora] = useState('');
-  const [jornada, setJornada] = useState('1');
+  const [local,setLocal]=useState(''); const [visitante,setVisitante]=useState(''); const [fecha,setFecha]=useState(''); const [hora,setHora]=useState(''); const [jornada,setJornada]=useState('1');
 
   useEffect(() => {
-    if (!usuario?.es_admin) {
-      Alert.alert('Acceso denegado', 'No tienes permisos.');
-      router.back();
-      return;
-    }
+    if (!usuario?.es_admin) { Alert.alert('Acceso denegado','No tienes permisos.'); router.back(); return; }
     cargarDatos();
   }, [usuario]);
 
   const cargarDatos = async () => {
     setLoading(true);
-    const [{ data: p, error: ep }, { data: q, error: eq }] = await Promise.all([
+    const [{ data:p },{ data:q }] = await Promise.all([
       supabase.from('partidos').select('*').order('jornada').order('fecha'),
-      supabase
-        .from('quinielas')
-        .select('id, jornada, estado_pago, usuario_id, usuarios(nombre)')
-        .order('jornada', { ascending: false }),
+      supabase.from('quinielas').select('id,jornada,estado_pago,usuario_id,usuarios(nombre,username)').order('jornada',{ascending:false}),
     ]);
-    if (ep) console.error('Error partidos:', ep.message);
-    if (eq) console.error('Error quinielas:', eq.message);
     if (p) setPartidos(p);
     if (q) setQuinielas(q as any);
     setLoading(false);
   };
 
   const agregarPartido = async () => {
-    if (!local || !visitante || !fecha || !hora || !jornada) {
-      Alert.alert('Campos incompletos', 'Llena todos los campos.');
-      return;
-    }
+    if (!local||!visitante||!fecha||!hora||!jornada) { Alert.alert('Campos incompletos','Llena todos los campos.'); return; }
     setSaving(true);
-    const { error } = await supabase.from('partidos').insert({
-      local: local.trim(), visitante: visitante.trim(),
-      fecha: `${fecha}T${hora}:00-06:00`,
-      jornada: parseInt(jornada), cerrado: false,
-    });
+    const { error } = await supabase.from('partidos').insert({ local:local.trim(), visitante:visitante.trim(), fecha:`${fecha}T${hora}:00-06:00`, jornada:parseInt(jornada), cerrado:false });
     setSaving(false);
-    if (error) { Alert.alert('Error', error.message); return; }
-    setModalPartido(false);
-    setLocal(''); setVisitante(''); setFecha(''); setHora('');
+    if (error) { Alert.alert('Error',error.message); return; }
+    setModalPartido(false); setLocal(''); setVisitante(''); setFecha(''); setHora('');
     cargarDatos();
-  };
-
-  const abrirModalResultado = (partido: Partido) => {
-    setPartidoSeleccionado(partido);
-    setResultadoInput(partido.resultado_final as any || null);
-    setModalResultado(true);
   };
 
   const guardarResultado = async () => {
-    if (!resultadoInput || !partidoSeleccionado) return;
+    if (!resultadoInput||!partidoSel) return;
     setSaving(true);
-
-    const { error } = await supabase
-      .from('partidos')
-      .update({ resultado_final: resultadoInput, cerrado: true })
-      .eq('id', partidoSeleccionado.id);
-
-    if (error) {
-      Alert.alert('Error guardando partido', error.message);
-      setSaving(false);
-      return;
-    }
-
-    await recalcularAciertos(partidoSeleccionado.jornada);
-
-    setSaving(false);
-    setModalResultado(false);
-    cargarDatos();
-    Alert.alert('\u2705 Listo', 'Resultado guardado y aciertos recalculados.');
+    const { error } = await supabase.from('partidos').update({resultado_final:resultadoInput,cerrado:true}).eq('id',partidoSel.id);
+    if (error) { Alert.alert('Error',error.message); setSaving(false); return; }
+    await recalcularAciertos(partidoSel.jornada);
+    setSaving(false); setModalResultado(false); cargarDatos();
+    Alert.alert('\u2705 Listo','Resultado guardado y aciertos recalculados.');
   };
 
-  const recalcularAciertos = async (jornadaNum: number) => {
-    // 1. Partidos con resultado de la jornada
-    const { data: partidosJornada, error: e1 } = await supabase
-      .from('partidos')
-      .select('id, resultado_final')
-      .eq('jornada', jornadaNum)
-      .not('resultado_final', 'is', null);
-
-    if (e1) { console.error('Error partidos jornada:', e1.message); return; }
-    if (!partidosJornada || partidosJornada.length === 0) return;
-
-    const idsPartidos = partidosJornada.map(p => p.id);
-
-    // 2. Quinielas de la jornada
-    const { data: quinielasJornada, error: e2 } = await supabase
-      .from('quinielas')
-      .select('id, usuario_id')
-      .eq('jornada', jornadaNum);
-
-    if (e2) { console.error('Error quinielas jornada:', e2.message); return; }
-    if (!quinielasJornada || quinielasJornada.length === 0) return;
-
-    // 3. Calcular aciertos por quiniela
-    for (const q of quinielasJornada) {
-      const { data: preds, error: e3 } = await supabase
-        .from('predicciones')
-        .select('partido_id, resultado')
-        .eq('usuario_id', q.usuario_id)
-        .in('partido_id', idsPartidos);
-
-      if (e3) { console.error('Error predicciones:', e3.message); continue; }
-
-      let aciertos = 0;
-      for (const pred of (preds || [])) {
-        const partido = partidosJornada.find(p => p.id === pred.partido_id);
-        if (partido?.resultado_final === pred.resultado) aciertos++;
-      }
-
-      const { error: e4 } = await supabase
-        .from('quinielas')
-        .update({ aciertos })
-        .eq('id', q.id);
-
-      if (e4) console.error('Error update aciertos:', e4.message);
+  const recalcularAciertos = async (jornadaNum:number) => {
+    const { data:pJs } = await supabase.from('partidos').select('id,resultado_final').eq('jornada',jornadaNum).not('resultado_final','is',null);
+    if (!pJs||pJs.length===0) return;
+    const ids = pJs.map(p=>p.id);
+    const { data:qJs } = await supabase.from('quinielas').select('id,usuario_id').eq('jornada',jornadaNum);
+    if (!qJs||qJs.length===0) return;
+    for (const q of qJs) {
+      const { data:preds } = await supabase.from('predicciones').select('partido_id,resultado').eq('usuario_id',q.usuario_id).in('partido_id',ids);
+      let aciertos=0;
+      for (const pred of (preds||[])) { const p=pJs.find(x=>x.id===pred.partido_id); if (p?.resultado_final===pred.resultado) aciertos++; }
+      await supabase.from('quinielas').update({aciertos}).eq('id',q.id);
     }
   };
 
-  const toggleCerrar = async (partido: Partido) => {
-    await supabase.from('partidos').update({ cerrado: !partido.cerrado }).eq('id', partido.id);
-    cargarDatos();
-  };
+  const toggleCerrar = async (p:Partido) => { await supabase.from('partidos').update({cerrado:!p.cerrado}).eq('id',p.id); cargarDatos(); };
+  const eliminarPartido = (id:string) => Alert.alert('Eliminar','\u00bfEliminar este partido?',[{text:'Cancelar',style:'cancel'},{text:'Eliminar',style:'destructive',onPress:async()=>{await supabase.from('partidos').delete().eq('id',id);cargarDatos();}}]);
+  const marcarPagado = async (qId:string) => { const{error}=await supabase.from('quinielas').update({estado_pago:'pagado'}).eq('id',qId); if(error)Alert.alert('Error',error.message); else cargarDatos(); };
 
-  const eliminarPartido = (id: string) => {
-    Alert.alert('Eliminar', '¿Eliminar este partido?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await supabase.from('partidos').delete().eq('id', id); cargarDatos(); } }
-    ]);
-  };
+  if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
 
-  const marcarPagado = async (quinielaId: string) => {
-    const { error } = await supabase
-      .from('quinielas')
-      .update({ estado_pago: 'pagado' })
-      .eq('id', quinielaId);
-    if (error) Alert.alert('Error', error.message);
-    else cargarDatos();
-  };
-
-  if (loading) return <ActivityIndicator style={{ flex: 1 }} color="#009ee3" />;
-
-  const jornadaActual = partidos.find(p => !p.cerrado)?.jornada ?? '-';
-  const pagados = quinielas.filter(q => q.estado_pago === 'pagado').length;
-  const pendientes = quinielas.filter(q => q.estado_pago === 'pendiente').length;
+  const jornadaActual = partidos.find(p=>!p.cerrado)?.jornada??'-';
+  const pagados = quinielas.filter(q=>q.estado_pago==='pagado').length;
+  const pendientes = quinielas.filter(q=>q.estado_pago==='pendiente').length;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+      {/* Header */}
+      <View style={[styles.header,{paddingTop:insets.top+12}]}>
+        <TouchableOpacity onPress={()=>router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={C.text}/>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>🛡️ Panel Admin</Text>
-        <View style={{ width: 40 }} />
+        <View style={{width:40}}/>
       </View>
 
+      {/* Stats */}
       <View style={styles.statsRow}>
-        <View style={styles.stat}><Text style={styles.statNum}>{jornadaActual}</Text><Text style={styles.statLabel}>Jornada activa</Text></View>
-        <View style={styles.stat}><Text style={[styles.statNum, { color: '#4caf50' }]}>{pagados}</Text><Text style={styles.statLabel}>Pagados</Text></View>
-        <View style={styles.stat}><Text style={[styles.statNum, { color: '#ff9800' }]}>{pendientes}</Text><Text style={styles.statLabel}>Pendientes</Text></View>
+        <View style={styles.stat}><Text style={styles.statNum}>{jornadaActual}</Text><Text style={styles.statLabel}>Jornada</Text></View>
+        <View style={styles.stat}><Text style={[styles.statNum,{color:C.green}]}>{pagados}</Text><Text style={styles.statLabel}>Pagados</Text></View>
+        <View style={styles.stat}><Text style={[styles.statNum,{color:C.orange}]}>{pendientes}</Text><Text style={styles.statLabel}>Pendientes</Text></View>
+        <View style={styles.stat}><Text style={styles.statNum}>{quinielas.length}</Text><Text style={styles.statLabel}>Total</Text></View>
       </View>
 
+      {/* Tabs */}
       <View style={styles.tabs}>
-        <TouchableOpacity style={[styles.tabBtn, tab === 'partidos' && styles.tabActivo]} onPress={() => setTab('partidos')}>
-          <Text style={[styles.tabTexto, tab === 'partidos' && styles.tabTextoActivo]}>⚽ Partidos</Text>
+        <TouchableOpacity style={[styles.tabBtn,tab==='partidos'&&styles.tabActivo]} onPress={()=>setTab('partidos')}>
+          <Text style={[styles.tabTexto,tab==='partidos'&&styles.tabTextoActivo]}>⚽ Partidos</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn, tab === 'quinielas' && styles.tabActivo]} onPress={() => setTab('quinielas')}>
-          <Text style={[styles.tabTexto, tab === 'quinielas' && styles.tabTextoActivo]}>📋 Quinielas ({quinielas.length})</Text>
+        <TouchableOpacity style={[styles.tabBtn,tab==='quinielas'&&styles.tabActivo]} onPress={()=>setTab('quinielas')}>
+          <Text style={[styles.tabTexto,tab==='quinielas'&&styles.tabTextoActivo]}>📋 Quinielas ({quinielas.length})</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={{ flex: 1 }}>
-        {tab === 'partidos' ? (
+      <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false}>
+        {tab==='partidos' ? (
           <>
-            <TouchableOpacity style={styles.btnAgregar} onPress={() => setModalPartido(true)}>
-              <Ionicons name="add-circle" size={20} color="#fff" />
+            <TouchableOpacity style={styles.btnAgregar} onPress={()=>setModalPartido(true)} activeOpacity={0.8}>
+              <Ionicons name="add-circle" size={20} color="#fff"/>
               <Text style={styles.btnAgregarTexto}>Agregar partido</Text>
             </TouchableOpacity>
-            {partidos.map((p) => (
+            {partidos.map(p=>(
               <View key={p.id} style={styles.card}>
                 <Text style={styles.cardJornada}>Jornada {p.jornada}</Text>
                 <Text style={styles.cardPartido}>{p.local} vs {p.visitante}</Text>
-                <Text style={styles.cardFecha}>
-                  {new Date(p.fecha).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                </Text>
-                {p.resultado_final && (
+                <Text style={styles.cardFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
+                {p.resultado_final&&(
                   <View style={styles.resultadoTag}>
-                    <Text style={styles.resultadoTagTexto}>
-                      Resultado: {p.resultado_final === '1' ? `1 - ${p.local}` : p.resultado_final === 'X' ? 'X - Empate' : `2 - ${p.visitante}`}
-                    </Text>
+                    <Ionicons name="checkmark-circle" size={13} color={C.green}/>
+                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante: ${p.visitante}`}</Text>
                   </View>
                 )}
                 <View style={styles.cardActions}>
-                  <TouchableOpacity onPress={() => abrirModalResultado(p)} style={[styles.actionBtn, { backgroundColor: '#1a1a2e' }]}>
-                    <Text style={styles.actionBtnTexto}>{p.resultado_final ? '✏️ Editar resultado' : '🎯 Capturar resultado'}</Text>
+                  <TouchableOpacity onPress={()=>{setPartidoSel(p);setResultadoInput(p.resultado_final as any||null);setModalResultado(true);}} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
+                    <Text style={styles.actionBtnTexto}>{p.resultado_final?'\u270f\ufe0f Editar':'🎯 Resultado'}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => toggleCerrar(p)} style={[styles.actionBtn, p.cerrado ? styles.btnAbrir : styles.btnCerrarPartido]}>
-                    <Text style={styles.actionBtnTexto}>{p.cerrado ? 'Abrir' : 'Cerrar'}</Text>
+                  <TouchableOpacity onPress={()=>toggleCerrar(p)} style={[styles.actionBtn,p.cerrado?{backgroundColor:C.green}:{backgroundColor:C.orange}]}>
+                    <Text style={styles.actionBtnTexto}>{p.cerrado?'Abrir':'Cerrar'}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => eliminarPartido(p.id)} style={[styles.actionBtn, styles.btnEliminar]}>
-                    <Ionicons name="trash" size={14} color="#fff" />
+                  <TouchableOpacity onPress={()=>eliminarPartido(p.id)} style={[styles.actionBtn,{backgroundColor:C.red}]}>
+                    <Ionicons name="trash" size={14} color="#fff"/>
                   </TouchableOpacity>
                 </View>
               </View>
             ))}
           </>
         ) : (
-          quinielas.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>No hay quinielas registradas aún.</Text>
-            </View>
+          quinielas.length===0 ? (
+            <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas aún.</Text></View>
           ) : (
-            quinielas.map((q) => (
+            quinielas.map(q=>(
               <View key={q.id} style={styles.card}>
                 <View style={styles.cardRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardPartido}>{(q.usuarios as any)?.nombre || 'Usuario'}</Text>
+                  <View style={{flex:1}}>
+                    <Text style={styles.cardPartido}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
                     <Text style={styles.cardJornada}>Jornada {q.jornada}</Text>
                   </View>
-                  {q.estado_pago === 'pagado' ? (
-                    <View style={[styles.actionBtn, { backgroundColor: '#4caf50' }]}>
-                      <Text style={styles.actionBtnTexto}>✅ Pagado</Text>
+                  {q.estado_pago==='pagado' ? (
+                    <View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}>
+                      <Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text>
                     </View>
                   ) : (
-                    <TouchableOpacity onPress={() => marcarPagado(q.id)} style={[styles.actionBtn, { backgroundColor: '#009ee3' }]}>
+                    <TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
                       <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
                     </TouchableOpacity>
                   )}
@@ -278,7 +173,7 @@ export default function AdminScreen() {
             ))
           )
         )}
-        <View style={{ height: 40 }} />
+        <View style={{height:40}}/>
       </ScrollView>
 
       {/* Modal nuevo partido */}
@@ -286,51 +181,44 @@ export default function AdminScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitulo}>Nuevo partido</Text>
-            <Text style={styles.label}>Equipo local</Text>
-            <TextInput style={styles.input} value={local} onChangeText={setLocal} placeholder="América" placeholderTextColor="#bbb" />
-            <Text style={styles.label}>Equipo visitante</Text>
-            <TextInput style={styles.input} value={visitante} onChangeText={setVisitante} placeholder="Chivas" placeholderTextColor="#bbb" />
-            <Text style={styles.label}>Fecha (YYYY-MM-DD)</Text>
-            <TextInput style={styles.input} value={fecha} onChangeText={setFecha} placeholder="2026-07-05" placeholderTextColor="#bbb" />
-            <Text style={styles.label}>Hora (HH:MM)</Text>
-            <TextInput style={styles.input} value={hora} onChangeText={setHora} placeholder="20:00" placeholderTextColor="#bbb" />
+            {[['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']].map(([lbl,val,set,ph])=>(
+              <View key={lbl as string}>
+                <Text style={styles.label}>{lbl as string}</Text>
+                <TextInput style={styles.input} value={val as string} onChangeText={set as any} placeholder={ph as string} placeholderTextColor="#555577" />
+              </View>
+            ))}
             <Text style={styles.label}>Jornada</Text>
-            <TextInput style={styles.input} value={jornada} onChangeText={setJornada} keyboardType="number-pad" />
+            <TextInput style={styles.input} value={jornada} onChangeText={setJornada} keyboardType="number-pad"/>
             <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.btnCancelar} onPress={() => setModalPartido(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.btnGuardar, saving && { opacity: 0.6 }]} onPress={agregarPartido} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnGuardarTexto}>Guardar</Text>}
+              <TouchableOpacity style={styles.btnCancelar} onPress={()=>setModalPartido(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.btnGuardar,saving&&{opacity:0.6}]} onPress={agregarPartido} disabled={saving}>
+                {saving?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Modal capturar resultado */}
+      {/* Modal resultado */}
       <Modal visible={modalResultado} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitulo}>Resultado del partido</Text>
-            <Text style={styles.modalSubtitulo}>{partidoSeleccionado?.local} vs {partidoSeleccionado?.visitante}</Text>
-            <Text style={styles.label}>Selecciona el resultado:</Text>
+            <Text style={styles.modalTitulo}>Capturar resultado</Text>
+            <Text style={styles.modalSubtitulo}>{partidoSel?.local} vs {partidoSel?.visitante}</Text>
             <View style={styles.resultadoOpciones}>
-              {(['1', 'X', '2'] as const).map(op => (
-                <TouchableOpacity
-                  key={op}
-                  style={[styles.resultadoOpcion, resultadoInput === op && styles.resultadoOpcionActiva]}
-                  onPress={() => setResultadoInput(op)}
-                >
-                  <Text style={[styles.resultadoOpcionTexto, resultadoInput === op && styles.resultadoOpcionTextoActivo]}>
-                    {op === '1' ? `1\n${partidoSeleccionado?.local}` : op === 'X' ? 'X\nEmpate' : `2\n${partidoSeleccionado?.visitante}`}
+              {(['1','X','2'] as const).map(op=>(
+                <TouchableOpacity key={op} style={[styles.resultadoOpcion,resultadoInput===op&&styles.resultadoOpcionActiva]} onPress={()=>setResultadoInput(op)}>
+                  <Text style={[styles.resultadoOpcionTexto,resultadoInput===op&&{color:C.accent}]}>
+                    {op==='1'?`1\n${partidoSel?.local}`:op==='X'?'X\nEmpate':`2\n${partidoSel?.visitante}`}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={styles.infoAciertos}>⚡ Al guardar se recalculan los aciertos automáticamente</Text>
+            <Text style={styles.infoAciertos}>⚡ Se recalculan los aciertos automáticamente</Text>
             <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.btnCancelar} onPress={() => setModalResultado(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.btnGuardar, (!resultadoInput || saving) && { opacity: 0.6 }]} onPress={guardarResultado} disabled={!resultadoInput || saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnGuardarTexto}>Guardar y calcular</Text>}
+              <TouchableOpacity style={styles.btnCancelar} onPress={()=>setModalResultado(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.btnGuardar,(!resultadoInput||saving)&&{opacity:0.5}]} onPress={guardarResultado} disabled={!resultadoInput||saving}>
+                {saving?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar y calcular</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -341,51 +229,45 @@ export default function AdminScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5' },
-  header: { backgroundColor: '#1a1a2e', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, paddingTop: 50 },
-  backBtn: { padding: 4 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  statsRow: { flexDirection: 'row', backgroundColor: '#1a1a2e', paddingBottom: 16, paddingHorizontal: 10 },
-  stat: { flex: 1, alignItems: 'center' },
-  statNum: { color: '#009ee3', fontSize: 28, fontWeight: 'bold' },
-  statLabel: { color: '#aaa', fontSize: 11, marginTop: 2 },
-  tabs: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  tabBtn: { flex: 1, padding: 14, alignItems: 'center' },
-  tabActivo: { borderBottomWidth: 3, borderBottomColor: '#009ee3' },
-  tabTexto: { fontSize: 14, fontWeight: '600', color: '#888' },
-  tabTextoActivo: { color: '#009ee3' },
-  btnAgregar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#009ee3', margin: 12, padding: 14, borderRadius: 10, justifyContent: 'center' },
-  btnAgregarTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
-  card: { backgroundColor: '#fff', marginHorizontal: 12, marginBottom: 8, borderRadius: 10, padding: 14, elevation: 2 },
-  cardRow: { flexDirection: 'row', alignItems: 'center' },
-  cardJornada: { fontSize: 11, color: '#009ee3', fontWeight: '600', marginBottom: 2 },
-  cardPartido: { fontSize: 15, fontWeight: 'bold', color: '#1a1a2e' },
-  cardFecha: { fontSize: 11, color: '#888', marginTop: 2, marginBottom: 8 },
-  resultadoTag: { backgroundColor: '#e8f5e9', padding: 6, borderRadius: 6, marginBottom: 8 },
-  resultadoTagTexto: { color: '#2e7d32', fontSize: 12, fontWeight: '600' },
-  cardActions: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  actionBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, alignItems: 'center' },
-  actionBtnTexto: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  btnCerrarPartido: { backgroundColor: '#ff9800' },
-  btnAbrir: { backgroundColor: '#4caf50' },
-  btnEliminar: { backgroundColor: '#e53935' },
-  emptyBox: { margin: 20, padding: 20, backgroundColor: '#fff', borderRadius: 12, alignItems: 'center' },
-  emptyText: { color: '#888', fontSize: 14 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24 },
-  modalTitulo: { fontSize: 18, fontWeight: 'bold', color: '#1a1a2e', marginBottom: 4 },
-  modalSubtitulo: { fontSize: 13, color: '#888', marginBottom: 16 },
-  label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 5 },
-  input: { borderWidth: 1.5, borderColor: '#ddd', borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 14, color: '#333' },
-  resultadoOpciones: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  resultadoOpcion: { flex: 1, borderWidth: 2, borderColor: '#ddd', borderRadius: 10, padding: 12, alignItems: 'center' },
-  resultadoOpcionActiva: { backgroundColor: '#1a1a2e', borderColor: '#1a1a2e' },
-  resultadoOpcionTexto: { fontSize: 13, color: '#555', textAlign: 'center', fontWeight: '600' },
-  resultadoOpcionTextoActivo: { color: '#fff' },
-  infoAciertos: { fontSize: 12, color: '#888', textAlign: 'center', marginBottom: 12 },
-  modalBtns: { flexDirection: 'row', gap: 10 },
-  btnCancelar: { flex: 1, padding: 14, borderRadius: 10, borderWidth: 1.5, borderColor: '#ddd', alignItems: 'center' },
-  btnCancelarTexto: { color: '#888', fontWeight: '600' },
-  btnGuardar: { flex: 1, padding: 14, borderRadius: 10, backgroundColor: '#009ee3', alignItems: 'center' },
-  btnGuardarTexto: { color: '#fff', fontWeight: 'bold' },
+  root:{flex:1,backgroundColor:C.bg}, center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
+  header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
+  backBtn:{padding:6,borderRadius:10,backgroundColor:C.card},
+  headerTitle:{color:C.text,fontSize:18,fontWeight:'bold'},
+  statsRow:{flexDirection:'row',backgroundColor:C.card,marginHorizontal:16,borderRadius:14,padding:16,marginBottom:8,borderWidth:1,borderColor:C.cardBorder},
+  stat:{flex:1,alignItems:'center'},
+  statNum:{color:C.accent,fontSize:24,fontWeight:'bold'}, statLabel:{color:C.textSub,fontSize:11,marginTop:2},
+  tabs:{flexDirection:'row',marginHorizontal:16,marginBottom:8,backgroundColor:C.card,borderRadius:12,padding:4,borderWidth:1,borderColor:C.cardBorder},
+  tabBtn:{flex:1,padding:10,alignItems:'center',borderRadius:10},
+  tabActivo:{backgroundColor:C.accentDim},
+  tabTexto:{fontSize:14,fontWeight:'600',color:C.textSub}, tabTextoActivo:{color:C.accent},
+  btnAgregar:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:C.accent,marginHorizontal:16,marginBottom:8,padding:14,borderRadius:12,justifyContent:'center'},
+  btnAgregarTexto:{color:'#fff',fontWeight:'bold',fontSize:15},
+  card:{backgroundColor:C.card,marginHorizontal:16,marginBottom:8,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
+  cardRow:{flexDirection:'row',alignItems:'center'},
+  cardJornada:{fontSize:11,color:C.accent,fontWeight:'600',marginBottom:2},
+  cardPartido:{fontSize:15,fontWeight:'bold',color:C.text},
+  cardFecha:{fontSize:11,color:C.textSub,marginTop:2,marginBottom:8},
+  resultadoTag:{flexDirection:'row',alignItems:'center',gap:5,backgroundColor:'rgba(0,200,151,0.1)',padding:7,borderRadius:8,marginBottom:8,borderWidth:1,borderColor:C.green},
+  resultadoTagTexto:{color:C.green,fontSize:12,fontWeight:'600'},
+  cardActions:{flexDirection:'row',gap:6,flexWrap:'wrap'},
+  actionBtn:{paddingHorizontal:12,paddingVertical:7,borderRadius:8,alignItems:'center'},
+  actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
+  emptyBox:{margin:20,padding:20,backgroundColor:C.card,borderRadius:12,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
+  emptyText:{color:C.textSub,fontSize:14},
+  modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
+  modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,borderTopWidth:1,borderColor:C.cardBorder},
+  modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4},
+  modalSubtitulo:{fontSize:13,color:C.textSub,marginBottom:16},
+  label:{fontSize:13,fontWeight:'600',color:C.textSub,marginBottom:5},
+  input:{borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,padding:12,marginBottom:12,fontSize:14,color:C.text,backgroundColor:'#12121f'},
+  resultadoOpciones:{flexDirection:'row',gap:10,marginBottom:16},
+  resultadoOpcion:{flex:1,borderWidth:2,borderColor:C.cardBorder,borderRadius:12,padding:14,alignItems:'center',backgroundColor:'#12121f'},
+  resultadoOpcionActiva:{borderColor:C.accent,backgroundColor:C.accentDim},
+  resultadoOpcionTexto:{fontSize:13,color:C.textSub,textAlign:'center',fontWeight:'600'},
+  infoAciertos:{fontSize:12,color:C.textSub,textAlign:'center',marginBottom:12},
+  modalBtns:{flexDirection:'row',gap:10},
+  btnCancelar:{flex:1,padding:14,borderRadius:12,borderWidth:1.5,borderColor:C.cardBorder,alignItems:'center'},
+  btnCancelarTexto:{color:C.textSub,fontWeight:'600'},
+  btnGuardar:{flex:1,padding:14,borderRadius:12,backgroundColor:C.accent,alignItems:'center'},
+  btnGuardarTexto:{color:'#fff',fontWeight:'bold'},
 });
