@@ -30,6 +30,7 @@ export default function PerfilScreen() {
       .select('id, jornada, estado_pago, aciertos, creado_en')
       .eq('usuario_id', user!.id)
       .order('creado_en', { ascending: false });
+    if (error) console.error('Error quinielas perfil:', error.message);
     if (data) setQuinielas(data);
     setLoading(false);
   };
@@ -41,9 +42,9 @@ export default function PerfilScreen() {
 
   const estadoBadge = (estado: string) => {
     switch (estado) {
-      case 'pagado':   return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
-      case 'pendiente': return { label: '\u23F3 Pago pendiente', bg: '#e65100' };
-      default:          return { label: '\u274C Sin pago', bg: '#b71c1c' };
+      case 'pagado':    return { label: '✅ Pagado — Participando', bg: '#1b5e20' };
+      case 'pendiente': return { label: '⏳ Pago pendiente',        bg: '#e65100' };
+      default:          return { label: '❌ Sin pago',               bg: '#b71c1c' };
     }
   };
 
@@ -55,7 +56,11 @@ export default function PerfilScreen() {
         <View style={styles.avatar}>
           <Ionicons name="person" size={50} color="#fff" />
         </View>
-        <Text style={styles.nombre}>{usuario?.nombre || 'Jugador'}</Text>
+        {/* Mostrar username si existe, si no nombre */}
+        <Text style={styles.username}>
+          {usuario?.username ? `@${usuario.username}` : usuario?.nombre || 'Jugador'}
+        </Text>
+        <Text style={styles.nombre}>{usuario?.nombre}</Text>
         <Text style={styles.email}>{user?.email}</Text>
         {usuario?.es_admin && (
           <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
@@ -125,8 +130,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
   avatarSection: { backgroundColor: '#1a1a2e', alignItems: 'center', padding: 30 },
   avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#009ee3', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  nombre: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
-  email: { color: '#aaa', fontSize: 13, marginTop: 4 },
+  username: { color: '#009ee3', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
+  nombre: { color: '#fff', fontSize: 15, opacity: 0.8 },
+  email: { color: '#aaa', fontSize: 12, marginTop: 2 },
   btnAdmin: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#009ee3', marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   btnAdminTexto: { color: '#fff', fontWeight: '600', fontSize: 13 },
   statsRow: { flexDirection: 'row', margin: 15, gap: 10 },

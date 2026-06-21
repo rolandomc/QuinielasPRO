@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 
 type Posicion = {
   usuario_id: string;
-  nombre: string;
+  username: string;
   aciertos: number;
   total_partidos: number;
 };
@@ -30,7 +30,7 @@ export default function ResultadosScreen() {
 
   const cargar = useCallback(async (j?: number) => {
     setLoading(true);
-    // Obtener jornadas disponibles
+
     const { data: jornadasData } = await supabase
       .from('partidos')
       .select('jornada')
@@ -40,7 +40,6 @@ export default function ResultadosScreen() {
     const jornadaActual = j ?? (unicas[unicas.length - 1] || 1);
     setJornada(jornadaActual);
 
-    // Cargar partidos de la jornada
     const { data: partidosData } = await supabase
       .from('partidos')
       .select('id, local, visitante, resultado_final, jornada')
@@ -48,17 +47,20 @@ export default function ResultadosScreen() {
       .order('fecha');
     setPartidos(partidosData || []);
 
-    // Cargar tabla de posiciones desde quinielas
+    // Tabla de posiciones — quinielas pagadas con username
     const { data: quinielasData } = await supabase
       .from('quinielas')
-      .select('usuario_id, aciertos, usuarios(nombre)')
+      .select('usuario_id, aciertos, usuarios(username, nombre)')
       .eq('jornada', jornadaActual)
       .eq('estado_pago', 'pagado')
       .order('aciertos', { ascending: false });
 
     const tabla: Posicion[] = (quinielasData || []).map((q: any) => ({
       usuario_id: q.usuario_id,
-      nombre: q.usuarios?.nombre || 'Jugador',
+      // Mostrar username si existe, si no nombre, si no 'Jugador'
+      username: q.usuarios?.username
+        ? `@${q.usuarios.username}`
+        : (q.usuarios?.nombre || 'Jugador'),
       aciertos: q.aciertos || 0,
       total_partidos: partidosData?.length || 0,
     }));
@@ -90,27 +92,19 @@ export default function ResultadosScreen() {
     >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🏆 Tabla de Posiciones</Text>
-        {miPosicion && (
-          <Text style={styles.miPosicion}>Tu posición: #{miPosicion}</Text>
-        )}
+        {miPosicion && <Text style={styles.miPosicion}>Tu posición: #{miPosicion}</Text>}
       </View>
 
-      {/* Selector de jornada */}
       {jornadas.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.jornadasScroll}>
           {jornadas.map(j => (
-            <TouchableOpacity
-              key={j}
-              style={[styles.jornadaBtn, jornada === j && styles.jornadaBtnActivo]}
-              onPress={() => cargar(j)}
-            >
+            <TouchableOpacity key={j} style={[styles.jornadaBtn, jornada === j && styles.jornadaBtnActivo]} onPress={() => cargar(j)}>
               <Text style={[styles.jornadaBtnTexto, jornada === j && styles.jornadaBtnTextoActivo]}>J{j}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       )}
 
-      {/* Resultados de partidos */}
       {partidos.length > 0 && (
         <View style={styles.seccion}>
           <Text style={styles.seccionTitulo}>⚽ Resultados Jornada {jornada}</Text>
@@ -118,10 +112,10 @@ export default function ResultadosScreen() {
             <View key={p.id} style={styles.partidoRow}>
               <Text style={styles.partidoEquipo}>{p.local}</Text>
               <View style={[styles.resultadoBadge, p.resultado_final ? styles.resultadoReal : styles.resultadoPendiente]}>
-                <Text style={styles.resultadoTexto}>
-                  {p.resultado_final === '1' ? `1 - ${p.local.slice(0,3).toUpperCase()}` :
-                   p.resultado_final === 'X' ? 'X - Empate' :
-                   p.resultado_final === '2' ? `2 - ${p.visitante.slice(0,3).toUpperCase()}` :
+                <Text style={[styles.resultadoTexto, !p.resultado_final && { color: '#888' }]}>
+                  {p.resultado_final === '1' ? `1 · ${p.local.slice(0,4)}` :
+                   p.resultado_final === 'X' ? 'X · Empate' :
+                   p.resultado_final === '2' ? `2 · ${p.visitante.slice(0,4)}` :
                    'Pendiente'}
                 </Text>
               </View>
@@ -131,7 +125,6 @@ export default function ResultadosScreen() {
         </View>
       )}
 
-      {/* Tabla */}
       {loading ? (
         <ActivityIndicator color="#009ee3" style={{ margin: 30 }} />
       ) : !hayResultados ? (
@@ -142,7 +135,7 @@ export default function ResultadosScreen() {
         </View>
       ) : posiciones.length === 0 ? (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyTexto}>No hay participantes con pago confirmado.</Text>
+          <Text style={styles.emptyTexto}>No hay participantes con pago confirmado aún.</Text>
         </View>
       ) : (
         <View style={styles.tabla}>
@@ -161,7 +154,7 @@ export default function ResultadosScreen() {
             ]}>
               <Text style={[styles.col, styles.colLugar, styles.colLugarTexto]}>{medalla(i + 1)}</Text>
               <Text style={[styles.col, styles.colNombre, p.usuario_id === user?.id && styles.textoMio]}>
-                {p.nombre}{p.usuario_id === user?.id ? ' (tú)' : ''}
+                {p.username}{p.usuario_id === user?.id ? ' (tú)' : ''}
               </Text>
               <Text style={[styles.col, styles.colAciertos, i === 0 && styles.textoOro]}>
                 {p.aciertos}/{p.total_partidos}
