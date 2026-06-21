@@ -17,7 +17,6 @@ type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
 type Resultado  = '1'|'X'|'2';
 type Marcador   = { local: string; visitante: string };
 
-// ── Conteo regresivo ──────────────────────────────────────────────────
 function useCountdown(fechaISO: string) {
   const calcDiff = () => Math.max(0, new Date(fechaISO).getTime() - Date.now());
   const [ms, setMs] = useState(calcDiff);
@@ -53,7 +52,6 @@ const cdStyles = StyleSheet.create({
   textoUrgente:{ color:C.orange },
 });
 
-// ── Confetti ─────────────────────────────────────────────────────────────
 const COLORES_CONFETTI = ['#00b4d8','#00c897','#ffd700','#ff9f43','#ff6b6b','#9b59b6','#f0f0ff'];
 const N_CONFETTI = 22;
 
@@ -98,7 +96,6 @@ const confettiStyles = StyleSheet.create({
   pieza: { position: 'absolute', top: 0, width: 10, height: 10, borderRadius: 2 },
 });
 
-// ── Selector de quinielas disponibles ─────────────────────────────────────
 function SelectorQuinielas({
   jornadas, seleccionada, onSeleccionar, quinielasUsuario,
 }: {
@@ -153,7 +150,6 @@ const selectorStyles = StyleSheet.create({
   chipPrecioTexto: { color: C.gold, fontSize: 10, fontWeight: '800' },
 });
 
-// ── Input de marcador (goles local / visitante) ───────────────────────
 function InputMarcador({
   partido, marcador, onChange, disabled,
 }: {
@@ -200,7 +196,6 @@ const marcadorStyles = StyleSheet.create({
   separador: { color:C.text, fontWeight:'900', fontSize:18 },
 });
 
-// ══════════════════════════════════════════════════════════════════════
 export default function QuinielaScreen() {
   const { user, usuario } = useAuth();
   const insets = useSafeAreaInsets();
@@ -360,13 +355,12 @@ export default function QuinielaScreen() {
   const formatFecha = (f: string) =>
     new Date(f).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 
-  // Bolsa estimada para mostrar al usuario
-  const calcularBolsaEstimada = () => {
-    if (!jornada?.precio || !jornada?.bolsa_total) return null;
+  // Solo calcula el premio neto visible para el usuario (sin mencionar % org)
+  const calcularPremioUsuario = () => {
+    if (!jornada?.bolsa_total) return null;
     const porcOrg = jornada.porcentaje_organizador ?? 0;
-    const bolsaTotal = jornada.bolsa_total;
-    const bolsaPremio = bolsaTotal * ((100 - porcOrg) / 100);
-    return { bolsaTotal, bolsaPremio, porcOrg };
+    const premio = jornada.bolsa_total * ((100 - porcOrg) / 100);
+    return premio;
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large" /></View>;
@@ -375,7 +369,7 @@ export default function QuinielaScreen() {
   const esPagado = quiniela?.estado_pago === 'pagado';
   const todoSel  = partidos.length > 0 && partidos.every(p => predicciones[p.id]);
   const selCount = partidos.filter(p => predicciones[p.id]).length;
-  const bolsaInfo = calcularBolsaEstimada();
+  const premioUsuario = calcularPremioUsuario();
 
   return (
     <View style={styles.root}>
@@ -387,7 +381,7 @@ export default function QuinielaScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── HEADER ── */}
+        {/* HEADER */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.headerTitle}>⚽ Mi Quiniela</Text>
           {jornada?.precio != null && jornada.precio > 0 && (
@@ -399,7 +393,7 @@ export default function QuinielaScreen() {
           )}
         </View>
 
-        {/* ── SELECTOR ── */}
+        {/* SELECTOR */}
         <SelectorQuinielas jornadas={jornadasAbiertas} seleccionada={jornada} onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario} />
 
         {jornadasAbiertas.length === 0 && (
@@ -420,7 +414,6 @@ export default function QuinielaScreen() {
 
         {jornada && partidos.length > 0 && (
           <>
-            {/* Nombre de la jornada */}
             <View style={styles.jornadaHeaderCard}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.jornadaNombreGrande}>{jornada.nombre}</Text>
@@ -432,22 +425,17 @@ export default function QuinielaScreen() {
               </View>
             </View>
 
-            {/* Info bolsa estimada */}
-            {bolsaInfo && (
+            {/* Premio a ganar — solo monto, sin mencionar % org */}
+            {premioUsuario != null && premioUsuario > 0 && (
               <View style={styles.bolsaCard}>
-                <Ionicons name="trophy-outline" size={18} color={C.gold} />
+                <Ionicons name="trophy" size={20} color={C.gold} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.bolsaTitulo}>Bolsa del premio</Text>
-                  <Text style={styles.bolsaSub}>
-                    Bolsa total: <Text style={{ color: C.gold, fontWeight: '800' }}>${bolsaInfo.bolsaTotal.toFixed(2)}</Text>
-                    {'  ·  '}Premio: <Text style={{ color: C.green, fontWeight: '800' }}>${bolsaInfo.bolsaPremio.toFixed(2)}</Text>
-                    {'  ·  '}{bolsaInfo.porcOrg}% org.
-                  </Text>
+                  <Text style={styles.bolsaTitulo}>🏆 Premio a ganar</Text>
+                  <Text style={styles.bolsaMonto}>${premioUsuario.toFixed(2)}</Text>
                 </View>
               </View>
             )}
 
-            {/* Banner pago recién confirmado */}
             {pagoRecienConfirmado && (
               <View style={styles.bannerPagoConfirmado}>
                 <Text style={styles.bannerPagoEmoji}>🎉</Text>
@@ -459,7 +447,6 @@ export default function QuinielaScreen() {
               </View>
             )}
 
-            {/* Banner estado quiniela */}
             {yaGuardo && !pagoRecienConfirmado && (
               <View style={[styles.statusBanner, esPagado ? styles.bannerGreen : styles.bannerOrange]}>
                 <Ionicons name={esPagado ? 'checkmark-circle' : 'time-outline'} size={18} color="#fff" />
@@ -469,7 +456,6 @@ export default function QuinielaScreen() {
               </View>
             )}
 
-            {/* Aviso desempate */}
             {!yaGuardo && (
               <View style={styles.avisoDesempate}>
                 <Ionicons name="information-circle-outline" size={14} color={C.accent} />
@@ -479,7 +465,6 @@ export default function QuinielaScreen() {
               </View>
             )}
 
-            {/* Barra de progreso */}
             {!yaGuardo && (
               <View style={styles.progressBox}>
                 <View style={styles.progressRow}>
@@ -493,7 +478,6 @@ export default function QuinielaScreen() {
               </View>
             )}
 
-            {/* Partidos */}
             {partidos.map(p => (
               <View key={p.id} style={styles.partidoCard}>
                 <Text style={styles.partidoFecha}>{formatFecha(p.fecha)}</Text>
@@ -522,7 +506,6 @@ export default function QuinielaScreen() {
                     );
                   })}
                 </View>
-                {/* Input marcador para desempate */}
                 <InputMarcador
                   partido={p}
                   marcador={marcadores[p.id] ?? { local: '', visitante: '' }}
@@ -532,7 +515,6 @@ export default function QuinielaScreen() {
               </View>
             ))}
 
-            {/* Botón pagar */}
             {!esPagado && (
               <TouchableOpacity
                 style={[styles.btnPagar, todoSel ? styles.btnPagarActivo : styles.btnDisabled]}
@@ -578,9 +560,9 @@ const styles = StyleSheet.create({
   estadoPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1, borderColor: C.green, backgroundColor: 'rgba(0,200,151,0.1)' },
   estadoDot: { width: 6, height: 6, borderRadius: 3 },
   estadoTexto: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  bolsaCard: { flexDirection:'row', alignItems:'center', gap:10, marginHorizontal:16, marginBottom:12, padding:14, borderRadius:12, backgroundColor:'rgba(255,215,0,0.07)', borderWidth:1, borderColor:'rgba(255,215,0,0.2)' },
-  bolsaTitulo: { color:C.gold, fontWeight:'800', fontSize:13 },
-  bolsaSub: { color:C.textSub, fontSize:11, marginTop:2 },
+  bolsaCard: { flexDirection:'row', alignItems:'center', gap:12, marginHorizontal:16, marginBottom:12, padding:16, borderRadius:14, backgroundColor:'rgba(255,215,0,0.08)', borderWidth:1.5, borderColor:'rgba(255,215,0,0.3)' },
+  bolsaTitulo: { color:C.textSub, fontWeight:'700', fontSize:12, marginBottom:2 },
+  bolsaMonto: { color:C.gold, fontWeight:'900', fontSize:26 },
   avisoDesempate: { flexDirection:'row', alignItems:'flex-start', gap:8, marginHorizontal:16, marginBottom:10, padding:12, borderRadius:10, backgroundColor:'rgba(0,180,216,0.07)', borderWidth:1, borderColor:'rgba(0,180,216,0.2)' },
   avisoTexto: { color:C.textSub, fontSize:11, flex:1, lineHeight:16 },
   bannerPagoConfirmado: { flexDirection:'row', alignItems:'center', gap:10, marginHorizontal:16, marginBottom:12, padding:16, borderRadius:14, backgroundColor:'rgba(0,200,151,0.12)', borderWidth:1.5, borderColor:C.green },
