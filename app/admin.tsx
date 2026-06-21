@@ -921,12 +921,7 @@ export default function AdminScreen(){
           <Text style={styles.headerTitulo}>
             {screen==='home'?'Admin':screen==='jornada_detalle'?(jornadaSel?.nombre||'Detalle'):screen==='quinielas'?'Quinielas':'Ingresos'}
           </Text>
-          {screen==='home'
-            ?<TouchableOpacity style={styles.headerAddBtn} onPress={abrirCrear} activeOpacity={0.8}>
-               <Ionicons name="add" size={22} color="#fff"/>
-             </TouchableOpacity>
-            :<View style={{width:36}}/>
-          }
+          <View style={{width:36}}/>
         </View>
       )}
 
@@ -940,16 +935,23 @@ export default function AdminScreen(){
 
       {mostrarNav&&(
         <View style={[styles.bottomNav,{paddingBottom:insets.bottom+4}]}>
-          {([
-            {s:'home',icon:'home-outline',label:'Inicio'},
-            {s:'quinielas',icon:'list-outline',label:'Quinielas'},
-            {s:'ingresos',icon:'bar-chart-outline',label:'Ingresos'},
-          ] as const).map(t=>(
-            <TouchableOpacity key={t.s} style={styles.navTab} onPress={()=>setScreen(t.s as Screen)} activeOpacity={0.7}>
-              <Ionicons name={t.icon as any} size={22} color={screen===t.s?C.accent:C.textMuted}/>
-              <Text style={[styles.navTabLabel,screen===t.s&&{color:C.accent}]}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
+          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('home')} activeOpacity={0.7}>
+            <Ionicons name="home-outline" size={22} color={screen==='home'?C.accent:C.textMuted}/>
+            <Text style={[styles.navTabLabel,screen==='home'&&{color:C.accent}]}>Inicio</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.navTab,styles.navTabCenter]} onPress={abrirCrear} activeOpacity={0.7}>
+            <View style={styles.navAddBtn}>
+              <Ionicons name="add" size={26} color="#fff"/>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('quinielas')} activeOpacity={0.7}>
+            <Ionicons name="list-outline" size={22} color={screen==='quinielas'?C.accent:C.textMuted}/>
+            <Text style={[styles.navTabLabel,screen==='quinielas'&&{color:C.accent}]}>Quinielas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('ingresos')} activeOpacity={0.7}>
+            <Ionicons name="bar-chart-outline" size={22} color={screen==='ingresos'?C.accent:C.textMuted}/>
+            <Text style={[styles.navTabLabel,screen==='ingresos'&&{color:C.accent}]}>Ingresos</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -966,9 +968,10 @@ const styles = StyleSheet.create({
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
   headerBack:{width:36,height:36,justifyContent:'center',alignItems:'center'},
   headerTitulo:{fontSize:17,fontWeight:'700',color:C.text,flex:1,textAlign:'center'},
-  headerAddBtn:{width:36,height:36,backgroundColor:C.accent,borderRadius:18,justifyContent:'center',alignItems:'center'},
   bottomNav:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.cardBorder},
   navTab:{flex:1,alignItems:'center',paddingTop:10,paddingBottom:4,gap:2},
+  navTabCenter:{justifyContent:'center',paddingTop:0,paddingBottom:0},
+  navAddBtn:{width:52,height:52,backgroundColor:C.accent,borderRadius:26,justifyContent:'center',alignItems:'center',marginBottom:8,shadowColor:C.accent,shadowOffset:{width:0,height:4},shadowOpacity:0.5,shadowRadius:8,elevation:8},
   navTabLabel:{fontSize:10,color:C.textMuted,fontWeight:'500'},
   statsRow:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:20},
   statChip:{flex:1,minWidth:'44%',borderRadius:12,borderWidth:1,padding:12,alignItems:'center',gap:4},
