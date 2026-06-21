@@ -43,7 +43,6 @@ export default function ResultadosScreen() {
   const medallaColor = (i:number) => i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':C.textSub;
   const medalla = (i:number) => i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}`;
 
-  // Renderiza una fila de partido con el ganador resaltado en verde
   const renderPartido = (p: Partido) => {
     const res = p.resultado_final;
     const localGana = res === '1';
@@ -53,18 +52,16 @@ export default function ResultadosScreen() {
       <View key={p.id} style={styles.partidoRow}>
         <View style={[styles.equipoBox, localGana && styles.equipoGanador]}>
           <Text style={[styles.equipoNombre, localGana && styles.equipoNombreGanador]} numberOfLines={1}>{p.local}</Text>
-          {localGana && <Text style={styles.ganadorLabel}>Ganador</Text>}
         </View>
         <View style={styles.centroCol}>
           {empate ? (
             <View style={styles.empateBadge}><Text style={styles.empateTexto}>Empate</Text></View>
           ) : res ? null : (
-            <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>Pendiente</Text></View>
+            <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>Pdte.</Text></View>
           )}
         </View>
-        <View style={[styles.equipoBox, styles.equipoBoxRight, visitanteGana && styles.equipoGanador]}>
+        <View style={[styles.equipoBox, visitanteGana && styles.equipoGanador]}>
           <Text style={[styles.equipoNombre, visitanteGana && styles.equipoNombreGanador]} numberOfLines={1}>{p.visitante}</Text>
-          {visitanteGana && <Text style={styles.ganadorLabel}>Ganador</Text>}
         </View>
       </View>
     );
@@ -148,19 +145,19 @@ const styles = StyleSheet.create({
   jornadaTexto:{color:C.textSub,fontWeight:'700',fontSize:13}, jornadaTextoActivo:{color:C.accent},
   seccion:{backgroundColor:C.card,marginHorizontal:16,marginBottom:12,borderRadius:14,padding:16,borderWidth:1,borderColor:C.cardBorder},
   seccionTitulo:{color:C.text,fontWeight:'bold',fontSize:15,marginBottom:14},
-  partidoRow:{flexDirection:'row',alignItems:'stretch',marginBottom:12},
-  equipoBox:{flex:1,borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,padding:10,alignItems:'center',justifyContent:'center',backgroundColor:'#12121f'},
-  equipoBoxRight:{},
+  partidoRow:{flexDirection:'row',alignItems:'stretch',marginBottom:10},
+  equipoBox:{flex:1,borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,paddingVertical:12,paddingHorizontal:8,alignItems:'center',justifyContent:'center',backgroundColor:'#12121f'},
   equipoGanador:{borderColor:C.green,backgroundColor:'rgba(0,200,151,0.08)'},
   equipoNombre:{fontSize:13,fontWeight:'bold',color:C.textSub,textAlign:'center'},
   equipoNombreGanador:{color:C.green},
-  ganadorLabel:{fontSize:10,color:C.green,fontWeight:'700',marginTop:3},
-  centroCol:{width:64,alignItems:'center',justifyContent:'center',paddingHorizontal:4},
-  empateBadge:{borderWidth:1.5,borderColor:C.orange,borderRadius:8,paddingHorizontal:6,paddingVertical:4,backgroundColor:'rgba(255,159,67,0.1)'},
+  centroCol:{width:60,alignItems:'center',justifyContent:'center',paddingHorizontal:4},
+  empateBadge:{borderWidth:1.5,borderColor:C.orange,borderRadius:8,paddingHorizontal:5,paddingVertical:4,backgroundColor:'rgba(255,159,67,0.1)'},
   empateTexto:{color:C.orange,fontSize:10,fontWeight:'700',textAlign:'center'},
-  pendienteBadge:{borderWidth:1,borderColor:'#2a2a40',borderRadius:8,paddingHorizontal:6,paddingVertical:4},
+  pendienteBadge:{borderWidth:1,borderColor:'#2a2a40',borderRadius:8,paddingHorizontal:5,paddingVertical:4},
   pendienteTexto:{color:C.textSub,fontSize:10,textAlign:'center'},
-  emptyBox:{alignItems:'center',padding:50}, emptyTitulo:{fontSize:16,fontWeight:'bold',color:C.text,marginBottom:8}, emptyTexto:{color:C.textSub,fontSize:13,textAlign:'center'},
+  emptyBox:{alignItems:'center',padding:50},
+  emptyTitulo:{fontSize:16,fontWeight:'bold',color:C.text,marginBottom:8},
+  emptyTexto:{color:C.textSub,fontSize:13,textAlign:'center'},
   tablaWrap:{marginHorizontal:16},
   tablaHeader:{flexDirection:'row',paddingHorizontal:14,paddingVertical:10,marginBottom:4},
   tablaRow:{flexDirection:'row',backgroundColor:C.card,padding:14,borderRadius:12,marginBottom:6,borderWidth:1,borderColor:C.cardBorder,alignItems:'center'},
