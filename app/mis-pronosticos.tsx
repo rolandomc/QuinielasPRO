@@ -24,7 +24,7 @@ export default function MisPronosticosScreen() {
 
   const cargar = async () => {
     setLoading(true);
-    // Filtrar por jornada_id (UUID) — no por el número viejo
+    // Filtrar por jornada_id (UUID) — no por el numero viejo
     const { data: partidos } = await supabase
       .from('partidos')
       .select('id,local,visitante,fecha,resultado_final')
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
   center:{flex:1,justifyContent:'center',alignItems:'center'},
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
   backBtn:{padding:6,borderRadius:10,backgroundColor:C.card},
-  headerTitle:{color:C.text,fontSize:17,fontWeight:'bold',flex:1,textAlign:'center'},
+  headerTitle:{color:C.text,fontSize:17,fontWeight:'bold',flex:1,textAlign:'center',marginHorizontal:8},
   resumen:{flexDirection:'row',backgroundColor:C.card,marginHorizontal:16,marginBottom:12,borderRadius:14,padding:20,alignItems:'center',justifyContent:'space-around',borderWidth:1,borderColor:C.cardBorder},
   resumenItem:{alignItems:'center'},
   resumenNum:{color:C.accent,fontSize:28,fontWeight:'bold'},

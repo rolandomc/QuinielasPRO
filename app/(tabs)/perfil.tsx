@@ -20,6 +20,7 @@ export default function PerfilScreen() {
 
   const fetchQuinielas = useCallback(async () => {
     if (!user) return;
+    // Traer quinielas con el nombre de la jornada via join
     const { data } = await supabase
       .from('quinielas')
       .select('id,jornada_id,estado_pago,aciertos,creado_en,jornadas(nombre)')
