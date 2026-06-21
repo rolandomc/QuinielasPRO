@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, ActivityIndicator, RefreshControl, StatusBar,
+  Alert, ActivityIndicator, RefreshControl, StatusBar, Platform,
 } from 'react-native';
+import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 
@@ -13,19 +13,20 @@ const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8'
 
 type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
 type Jornada    = { id:string; nombre:string; estado:string };
-type QuinielaDB = { id:string; estado_pago:string; jornada_id:string; codigo:string; aciertos:number };
+type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
+type Resultado  = '1'|'X'|'2';
 
 export default function QuinielaScreen() {
-  const { user } = useAuth();
-  const insets   = useSafeAreaInsets();
-  const router   = useRouter();
+  const { user, usuario } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [jornada, setJornada]           = useState<Jornada|null>(null);
   const [partidos, setPartidos]         = useState<Partido[]>([]);
-  const [predicciones, setPredicciones] = useState<Record<string,'1'|'X'|'2'>>({});
+  const [predicciones, setPredicciones] = useState<Record<string, Resultado>>({});
   const [quiniela, setQuiniela]         = useState<QuinielaDB|null>(null);
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
+  const [loadingPago, setLoadingPago]   = useState(false);
 
   const cargar = useCallback(async () => {
     if (!user) return;
@@ -47,7 +48,7 @@ export default function QuinielaScreen() {
 
     const { data: qData } = await supabase
       .from('quinielas')
-      .select('id,estado_pago,jornada_id,codigo,aciertos')
+      .select('id,estado_pago,jornada_id')
       .eq('usuario_id', user.id)
       .eq('jornada_id', jData.id)
       .maybeSingle();
@@ -58,8 +59,8 @@ export default function QuinielaScreen() {
         .from('predicciones').select('partido_id,resultado')
         .eq('usuario_id', user.id)
         .in('partido_id', pData.map(p => p.id));
-      const map: Record<string,'1'|'X'|'2'> = {};
-      (predData || []).forEach(p => { map[p.partido_id] = p.resultado; });
+      const map: Record<string, Resultado> = {};
+      (predData || []).forEach(p => { map[p.partido_id] = p.resultado as Resultado; });
       setPredicciones(map);
     } else {
       setPredicciones({});
@@ -69,27 +70,69 @@ export default function QuinielaScreen() {
   useEffect(() => { setLoading(true); cargar().finally(() => setLoading(false)); }, [cargar]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await cargar(); setRefreshing(false); }, [cargar]);
 
-  const seleccionar = (id: string, r: '1'|'X'|'2') => {
+  const seleccionar = (id: string, r: Resultado) => {
     if (quiniela) return;
     setPredicciones(p => ({ ...p, [id]: r }));
   };
 
-  // Ir a pagar — las predicciones viajan como params, Supabase NO se toca aqui
-  const irAPagar = () => {
+  const confirmarYPagar = async () => {
     if (!user || !jornada) return;
-    if (Object.keys(predicciones).length < partidos.length) {
-      Alert.alert('Incompleto', 'Selecciona un resultado para cada partido.');
-      return;
+    const completa = partidos.every(p => predicciones[p.id]);
+    if (!completa) { Alert.alert('Incompleto', 'Selecciona un resultado para cada partido.'); return; }
+
+    setLoadingPago(true);
+    try {
+      // 1. Guardar predicciones con upsert (no da duplicate key)
+      const rows = partidos.map(p => ({
+        usuario_id: user.id,
+        partido_id: p.id,
+        resultado: predicciones[p.id],
+      }));
+      const { error: predError } = await supabase
+        .from('predicciones')
+        .upsert(rows, { onConflict: 'usuario_id,partido_id' });
+      if (predError) throw new Error('Error guardando predicciones: ' + predError.message);
+
+      // 2. Crear o actualizar quiniela con upsert (no da duplicate key)
+      const { error: qError } = await supabase
+        .from('quinielas')
+        .upsert(
+          { usuario_id: user.id, jornada_id: jornada.id, jornada: 0, estado_pago: 'pendiente', aciertos: 0 },
+          { onConflict: 'usuario_id,jornada_id' }
+        );
+      if (qError) throw new Error('Error creando quiniela: ' + qError.message);
+
+      // 3. Llamar Edge Function crear-pago — igual que siempre
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(
+        'https://kdvbmvsolrquphfedldz.supabase.co/functions/v1/crear-pago',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({
+            nombre: usuario?.nombre || 'Jugador',
+            usuario_id: user.id,
+            jornada_id: jornada.id,
+            jornada_nombre: jornada.nombre,
+          }),
+        }
+      );
+      const data = await response.json();
+      if (response.ok && data.urlPago) {
+        await cargar();
+        if (Platform.OS === 'web') (window as any).open(data.urlPago, '_self');
+        else Linking.openURL(data.urlPago);
+      } else {
+        throw new Error(data.error || 'No se pudo crear el pago.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoadingPago(false);
     }
-    // Serializar predicciones como JSON para pasarlas como param
-    router.push({
-      pathname: '/pago/checkout',
-      params: {
-        jornada_id:  jornada.id,
-        jornada_nombre: jornada.nombre,
-        predicciones: JSON.stringify(predicciones),
-      },
-    });
   };
 
   const formatFecha = (f: string) =>
@@ -99,8 +142,8 @@ export default function QuinielaScreen() {
 
   const yaGuardo = !!quiniela;
   const esPagado = quiniela?.estado_pago === 'pagado';
-  const todoSel  = partidos.length > 0 && Object.keys(predicciones).length === partidos.length;
-  const selCount = Object.keys(predicciones).length;
+  const todoSel  = partidos.length > 0 && partidos.every(p => predicciones[p.id]);
+  const selCount = partidos.filter(p => predicciones[p.id]).length;
 
   return (
     <View style={styles.root}>
@@ -119,7 +162,6 @@ export default function QuinielaScreen() {
           )}
         </View>
 
-        {/* Sin jornada activa */}
         {!jornada && (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyEmoji}>⏳</Text>
@@ -138,20 +180,17 @@ export default function QuinielaScreen() {
 
         {jornada && partidos.length > 0 && (
           <>
-            {/* Banner si ya pagó */}
             {yaGuardo && (
               <View style={[styles.statusBanner, esPagado ? styles.bannerGreen : styles.bannerOrange]}>
                 <Ionicons name={esPagado ? 'checkmark-circle' : 'time-outline'} size={18} color="#fff"/>
-                <View style={{flex:1}}>
-                  <Text style={styles.statusText}>
-                    {esPagado ? '¡Pago confirmado — Estás participando! 🎉' : 'Pago pendiente — Confirma tu pago'}
-                  </Text>
-                  {quiniela?.codigo && <Text style={styles.codigoText}>Código: {quiniela.codigo}</Text>}
-                </View>
+                <Text style={styles.statusText}>
+                  {esPagado
+                    ? 'Pago confirmado — ¡Estás participando! 🎉'
+                    : 'Pago pendiente — Completa tu pago para participar'}
+                </Text>
               </View>
             )}
 
-            {/* Progreso selección */}
             {!yaGuardo && (
               <View style={styles.progressBox}>
                 <View style={styles.progressRow}>
@@ -164,7 +203,6 @@ export default function QuinielaScreen() {
               </View>
             )}
 
-            {/* Partidos */}
             {partidos.map(p => (
               <View key={p.id} style={styles.partidoCard}>
                 <Text style={styles.partidoFecha}>{formatFecha(p.fecha)}</Text>
@@ -174,7 +212,7 @@ export default function QuinielaScreen() {
                   <Text style={styles.equipo} numberOfLines={1}>{p.visitante}</Text>
                 </View>
                 <View style={styles.opcionesRow}>
-                  {(['1','X','2'] as const).map(op => {
+                  {(['1','X','2'] as Resultado[]).map(op => {
                     const activo = predicciones[p.id] === op;
                     return (
                       <TouchableOpacity
@@ -195,16 +233,20 @@ export default function QuinielaScreen() {
               </View>
             ))}
 
-            {/* Botón ir a pagar */}
-            {!yaGuardo && (
+            {/* Botón principal — Confirmar y Pagar con MP */}
+            {!esPagado && (
               <TouchableOpacity
-                style={[styles.btnPagar, !todoSel && styles.btnDisabled]}
-                onPress={irAPagar}
-                disabled={!todoSel}
+                style={[styles.btnPagar, (!todoSel && !yaGuardo) && styles.btnDisabled]}
+                onPress={confirmarYPagar}
+                disabled={loadingPago || (!todoSel && !yaGuardo)}
                 activeOpacity={0.8}
               >
-                <Ionicons name="card" size={20} color="#fff"/>
-                <Text style={styles.btnPagarTexto}>Pagar con Mercado Pago</Text>
+                {loadingPago
+                  ? <ActivityIndicator color="#fff"/>
+                  : <Text style={styles.btnPagarTexto}>
+                      {yaGuardo ? '💳 Reintentar pago' : '💳 Confirmar y pagar'}
+                    </Text>
+                }
               </TouchableOpacity>
             )}
           </>
@@ -224,10 +266,10 @@ const styles = StyleSheet.create({
   emptyBox:{alignItems:'center',padding:60}, emptyEmoji:{fontSize:54,marginBottom:16},
   emptyTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:8},
   emptyTexto:{color:C.textSub,fontSize:14,textAlign:'center',lineHeight:22},
-  statusBanner:{flexDirection:'row',alignItems:'flex-start',gap:10,marginHorizontal:16,marginBottom:12,padding:14,borderRadius:12},
+  statusBanner:{flexDirection:'row',alignItems:'center',gap:10,marginHorizontal:16,marginBottom:12,padding:14,borderRadius:12},
   bannerGreen:{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green},
   bannerOrange:{backgroundColor:'rgba(255,159,67,0.15)',borderWidth:1,borderColor:C.orange},
-  statusText:{color:C.text,fontWeight:'600',fontSize:13}, codigoText:{color:C.textSub,fontSize:12,marginTop:3},
+  statusText:{color:C.text,fontWeight:'600',fontSize:13,flex:1},
   progressBox:{marginHorizontal:16,marginBottom:12,backgroundColor:C.card,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
   progressRow:{flexDirection:'row',justifyContent:'space-between',marginBottom:8},
   progressLabel:{color:C.textSub,fontSize:13}, progressPct:{color:C.accent,fontSize:13,fontWeight:'700'},
@@ -243,6 +285,7 @@ const styles = StyleSheet.create({
   opcionActiva:{backgroundColor:C.accentDim,borderColor:C.accent},
   opcionLetra:{fontSize:17,fontWeight:'bold',color:C.textSub}, opcionLetraActiva:{color:C.accent},
   opcionEquipo:{fontSize:11,color:'#555577',marginTop:3}, opcionEquipoActivo:{color:C.accent},
-  btnPagar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,backgroundColor:'#009ee3',marginHorizontal:16,marginTop:6,padding:17,borderRadius:14},
-  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.6}, btnPagarTexto:{color:'#fff',fontWeight:'bold',fontSize:16},
+  btnPagar:{alignItems:'center',justifyContent:'center',backgroundColor:'#1a1a2e',marginHorizontal:16,marginTop:8,padding:17,borderRadius:14},
+  btnDisabled:{backgroundColor:'#1e2a30',opacity:0.6},
+  btnPagarTexto:{color:'#fff',fontWeight:'bold',fontSize:16},
 });
