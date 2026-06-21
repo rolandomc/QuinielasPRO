@@ -4,13 +4,19 @@ import {
   StyleSheet, Alert, KeyboardAvoidingView,
   Platform, ScrollView, ActivityIndicator, Switch,
 } from 'react-native';
-import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
 const EMAIL_KEY = 'saved_email';
 const BIOMETRIC_KEY = 'biometric_enabled';
+
+// expo-local-authentication solo existe en iOS/Android
+const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
+let LocalAuthentication: any = null;
+if (isNative) {
+  LocalAuthentication = require('expo-local-authentication');
+}
 
 export default function LoginScreen() {
   const [modo, setModo] = useState<'login' | 'registro'>('login');
@@ -31,6 +37,7 @@ export default function LoginScreen() {
   const inicializar = async () => {
     const emailGuardado = await AsyncStorage.getItem(EMAIL_KEY);
     if (emailGuardado) { setEmail(emailGuardado); setRecordarCorreo(true); }
+    if (!isNative || !LocalAuthentication) return;
     const compatible = await LocalAuthentication.hasHardwareAsync();
     const enrollado = await LocalAuthentication.isEnrolledAsync();
     setBiometricDisponible(compatible && enrollado);
@@ -44,9 +51,10 @@ export default function LoginScreen() {
   };
 
   const autenticarBiometrico = async () => {
+    if (!isNative || !LocalAuthentication) return;
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: `Ingresa con ${biometricTipo}`,
-      fallbackLabel: 'Usar contraseña',
+      fallbackLabel: 'Usar contrase\u00f1a',
       cancelLabel: 'Cancelar',
       disableDeviceFallback: false,
     });
@@ -59,20 +67,21 @@ export default function LoginScreen() {
         setLoading(false);
         if (error) Alert.alert('Error', 'No se pudo autenticar. Ingresa manualmente.');
       } else {
-        Alert.alert('Sin credenciales', 'Inicia sesión manualmente primero.');
+        Alert.alert('Sin credenciales', 'Inicia sesi\u00f3n manualmente primero.');
       }
     }
   };
 
   const toggleBiometrico = async (valor: boolean) => {
+    if (!isNative || !LocalAuthentication) return;
     if (valor) {
-      if (!email || !password) { Alert.alert('Ingresa primero', 'Escribe tu correo y contraseña antes de habilitar la biometría.'); return; }
+      if (!email || !password) { Alert.alert('Ingresa primero', 'Escribe tu correo y contrase\u00f1a antes de habilitar la biometr\u00eda.'); return; }
       const result = await LocalAuthentication.authenticateAsync({ promptMessage: `Confirma tu identidad para habilitar ${biometricTipo}` });
       if (result.success) {
         await AsyncStorage.setItem(BIOMETRIC_KEY, 'true');
         await AsyncStorage.setItem('saved_password', password);
         setBiometricHabilitado(true);
-        Alert.alert('✅ Listo', `${biometricTipo} habilitado.`);
+        Alert.alert('\u2705 Listo', `${biometricTipo} habilitado.`);
       }
     } else {
       await AsyncStorage.setItem(BIOMETRIC_KEY, 'false');
@@ -82,12 +91,12 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
-    if (!email || !password) { Alert.alert('Campos requeridos', 'Ingresa tu correo y contraseña.'); return; }
+    if (!email || !password) { Alert.alert('Campos requeridos', 'Ingresa tu correo y contrase\u00f1a.'); return; }
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     setLoading(false);
     if (error) {
-      if (error.message.includes('Invalid login credentials')) Alert.alert('Credenciales incorrectas', 'El correo o la contraseña no coinciden.');
+      if (error.message.includes('Invalid login credentials')) Alert.alert('Credenciales incorrectas', 'El correo o la contrase\u00f1a no coinciden.');
       else Alert.alert('Error', error.message);
     } else {
       if (recordarCorreo) await AsyncStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
@@ -97,12 +106,11 @@ export default function LoginScreen() {
 
   const handleRegistro = async () => {
     if (!nombre || !username || !email || !password) { Alert.alert('Campos requeridos', 'Completa todos los campos.'); return; }
-    if (username.length < 3) { Alert.alert('Username inválido', 'El nombre de usuario debe tener al menos 3 caracteres.'); return; }
-    if (/\s/.test(username)) { Alert.alert('Username inválido', 'El nombre de usuario no puede tener espacios.'); return; }
-    if (password.length < 6) { Alert.alert('Contraseña muy corta', 'Mínimo 6 caracteres.'); return; }
+    if (username.length < 3) { Alert.alert('Username inv\u00e1lido', 'El nombre de usuario debe tener al menos 3 caracteres.'); return; }
+    if (/\s/.test(username)) { Alert.alert('Username inv\u00e1lido', 'El nombre de usuario no puede tener espacios.'); return; }
+    if (password.length < 6) { Alert.alert('Contrase\u00f1a muy corta', 'M\u00ednimo 6 caracteres.'); return; }
     setLoading(true);
 
-    // Verificar que username no exista
     const { data: existeUsername } = await supabase
       .from('usuarios')
       .select('id')
@@ -110,7 +118,7 @@ export default function LoginScreen() {
       .single();
     if (existeUsername) {
       setLoading(false);
-      Alert.alert('Username en uso', 'Ese nombre de usuario ya está tomado. Elige otro.');
+      Alert.alert('Username en uso', 'Ese nombre de usuario ya est\u00e1 tomado. Elige otro.');
       return;
     }
 
@@ -121,7 +129,7 @@ export default function LoginScreen() {
     });
     setLoading(false);
     if (error) {
-      if (error.message.includes('already registered')) { Alert.alert('Correo en uso', 'Ya existe una cuenta. Inicia sesión.'); setModo('login'); }
+      if (error.message.includes('already registered')) { Alert.alert('Correo en uso', 'Ya existe una cuenta. Inicia sesi\u00f3n.'); setModo('login'); }
       else Alert.alert('Error', error.message);
     } else {
       if (recordarCorreo) await AsyncStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
