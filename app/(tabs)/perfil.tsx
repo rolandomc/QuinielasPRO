@@ -8,7 +8,7 @@ import { supabase } from '../../lib/supabase';
 
 const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b' };
 
-type Quiniela = { id:string; jornada:number; estado_pago:string; aciertos:number; creado_en:string };
+type Quiniela = { id:string; jornada_id:string; jornada_nombre:string; estado_pago:string; aciertos:number; creado_en:string };
 
 export default function PerfilScreen() {
   const { user, usuario, signOut, refreshUsuario } = useAuth();
@@ -20,38 +20,48 @@ export default function PerfilScreen() {
 
   const fetchQuinielas = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase.from('quinielas').select('id,jornada,estado_pago,aciertos,creado_en').eq('usuario_id',user.id).order('creado_en',{ascending:false});
-    if (data) setQuinielas(data);
+    // Traer quinielas con el nombre de la jornada via join
+    const { data } = await supabase
+      .from('quinielas')
+      .select('id,jornada_id,estado_pago,aciertos,creado_en,jornadas(nombre)')
+      .eq('usuario_id', user.id)
+      .order('creado_en', { ascending: false });
+    if (data) {
+      setQuinielas(data.map((q: any) => ({
+        ...q,
+        jornada_nombre: q.jornadas?.nombre || 'Jornada',
+      })));
+    }
   }, [user]);
 
-  useEffect(() => { if (user) { setLoading(true); fetchQuinielas().finally(()=>setLoading(false)); } }, [user,fetchQuinielas]);
-  const onRefresh = useCallback(async () => { setRefreshing(true); await Promise.all([fetchQuinielas(),refreshUsuario()]); setRefreshing(false); }, [fetchQuinielas,refreshUsuario]);
+  useEffect(() => { if (user) { setLoading(true); fetchQuinielas().finally(() => setLoading(false)); } }, [user, fetchQuinielas]);
+  const onRefresh = useCallback(async () => { setRefreshing(true); await Promise.all([fetchQuinielas(), refreshUsuario()]); setRefreshing(false); }, [fetchQuinielas, refreshUsuario]);
   const cerrarSesion = async () => { await signOut(); router.replace('/login'); };
 
-  const estadoConfig = (estado:string) => {
-    switch(estado) {
-      case 'pagado':    return { label:'Pagado \u2014 Participando', color:C.green,  icon:'checkmark-circle' as const };
-      case 'pendiente': return { label:'Pago pendiente',             color:C.orange, icon:'time-outline' as const };
-      default:          return { label:'Sin pago',                    color:C.red,    icon:'close-circle' as const };
+  const estadoConfig = (estado: string) => {
+    switch (estado) {
+      case 'pagado':    return { label: 'Pagado — Participando', color: C.green,  icon: 'checkmark-circle' as const };
+      case 'pendiente': return { label: 'Pago pendiente',        color: C.orange, icon: 'time-outline' as const };
+      default:          return { label: 'Sin pago',              color: C.red,    icon: 'close-circle' as const };
     }
   };
 
-  const totalAciertos = quinielas.reduce((a,q)=>a+(q.aciertos||0),0);
-  const pagadas = quinielas.filter(q=>q.estado_pago==='pagado').length;
+  const totalAciertos = quinielas.reduce((a, q) => a + (q.aciertos || 0), 0);
+  const pagadas = quinielas.filter(q => q.estado_pago === 'pagado').length;
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
       <ScrollView style={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]}/>} showsVerticalScrollIndicator={false}>
-        <View style={[styles.hero,{paddingTop:insets.top+16}]}>
+        <View style={[styles.hero, { paddingTop: insets.top + 16 }]}>
           <View style={styles.avatarRing}>
             <View style={styles.avatar}><Ionicons name="person" size={40} color="#fff"/></View>
           </View>
-          <Text style={styles.username}>{usuario?.username?`@${usuario.username}`:usuario?.nombre||'Jugador'}</Text>
-          {usuario?.nombre&&usuario?.username&&<Text style={styles.nombre}>{usuario.nombre}</Text>}
+          <Text style={styles.username}>{usuario?.username ? `@${usuario.username}` : usuario?.nombre || 'Jugador'}</Text>
+          {usuario?.nombre && usuario?.username && <Text style={styles.nombre}>{usuario.nombre}</Text>}
           <Text style={styles.email}>{user?.email}</Text>
-          {usuario?.es_admin&&(
-            <TouchableOpacity style={styles.btnAdmin} onPress={()=>router.push('/admin')} activeOpacity={0.8}>
+          {usuario?.es_admin && (
+            <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')} activeOpacity={0.8}>
               <Ionicons name="shield-checkmark" size={14} color="#fff"/>
               <Text style={styles.btnAdminTexto}>Panel Admin</Text>
             </TouchableOpacity>
@@ -60,36 +70,41 @@ export default function PerfilScreen() {
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}><Text style={styles.statNum}>{quinielas.length}</Text><Text style={styles.statLabel}>Jugadas</Text></View>
-          <View style={[styles.statCard,{borderColor:C.accent}]}><Text style={[styles.statNum,{color:C.accent}]}>{totalAciertos}</Text><Text style={styles.statLabel}>Aciertos</Text></View>
-          <View style={styles.statCard}><Text style={[styles.statNum,{color:C.green}]}>{pagadas}</Text><Text style={styles.statLabel}>Pagadas</Text></View>
+          <View style={[styles.statCard, { borderColor: C.accent }]}><Text style={[styles.statNum, { color: C.accent }]}>{totalAciertos}</Text><Text style={styles.statLabel}>Aciertos</Text></View>
+          <View style={styles.statCard}><Text style={[styles.statNum, { color: C.green }]}>{pagadas}</Text><Text style={styles.statLabel}>Pagadas</Text></View>
         </View>
 
         <Text style={styles.seccionTitulo}>Mis quinielas</Text>
 
         {loading ? (
-          <ActivityIndicator color={C.accent} style={{margin:30}}/>
-        ) : quinielas.length===0 ? (
+          <ActivityIndicator color={C.accent} style={{ margin: 30 }}/>
+        ) : quinielas.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={{fontSize:40,marginBottom:10}}>🎮</Text>
+            <Text style={{ fontSize: 40, marginBottom: 10 }}>🎮</Text>
             <Text style={styles.emptyTexto}>Aún no has participado en ninguna quiniela.</Text>
           </View>
         ) : (
-          quinielas.map((q,i) => {
+          quinielas.map((q, i) => {
             const est = estadoConfig(q.estado_pago);
             return (
-              <TouchableOpacity key={i} style={styles.quinielaCard} onPress={()=>router.push({pathname:'/mis-pronosticos',params:{jornada:q.jornada}})} activeOpacity={0.75}>
+              <TouchableOpacity
+                key={i}
+                style={styles.quinielaCard}
+                onPress={() => router.push({ pathname: '/mis-pronosticos', params: { jornada_id: q.jornada_id, jornada_nombre: q.jornada_nombre } })}
+                activeOpacity={0.75}
+              >
                 <View style={styles.qCardTop}>
                   <View>
-                    <Text style={styles.qJornada}>Jornada {q.jornada}</Text>
+                    <Text style={styles.qJornada}>{q.jornada_nombre}</Text>
                     <View style={styles.qEstadoRow}>
                       <Ionicons name={est.icon} size={13} color={est.color}/>
-                      <Text style={[styles.qEstado,{color:est.color}]}>{est.label}</Text>
+                      <Text style={[styles.qEstado, { color: est.color }]}>{est.label}</Text>
                     </View>
                   </View>
                   <View style={styles.qAciertosBox}>
-                    {q.aciertos>0&&<Text style={styles.qAciertosNum}>{q.aciertos}</Text>}
-                    {q.aciertos>0&&<Text style={styles.qAciertosLabel}>aciertos</Text>}
-                    <Ionicons name="chevron-forward" size={16} color={C.textSub} style={{marginTop:q.aciertos>0?0:4}}/>
+                    {q.aciertos > 0 && <Text style={styles.qAciertosNum}>{q.aciertos}</Text>}
+                    {q.aciertos > 0 && <Text style={styles.qAciertosLabel}>aciertos</Text>}
+                    <Ionicons name="chevron-forward" size={16} color={C.textSub} style={{ marginTop: q.aciertos > 0 ? 0 : 4 }}/>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -101,7 +116,7 @@ export default function PerfilScreen() {
           <Ionicons name="log-out-outline" size={18} color={C.red}/>
           <Text style={styles.btnCerrarTexto}>Cerrar sesión</Text>
         </TouchableOpacity>
-        <View style={{height:50}}/>
+        <View style={{ height: 50 }}/>
       </ScrollView>
     </View>
   );

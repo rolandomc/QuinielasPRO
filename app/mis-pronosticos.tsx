@@ -14,62 +14,69 @@ export default function MisPronosticosScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { jornada } = useLocalSearchParams<{ jornada:string }>();
+  const { jornada_id, jornada_nombre } = useLocalSearchParams<{ jornada_id: string; jornada_nombre: string }>();
   const [filas, setFilas] = useState<FilaPartido[]>([]);
   const [loading, setLoading] = useState(true);
   const [aciertos, setAciertos] = useState(0);
   const [total, setTotal] = useState(0);
 
-  useEffect(() => { if (user&&jornada) cargar(); }, [jornada,user]);
+  useEffect(() => { if (user && jornada_id) cargar(); }, [jornada_id, user]);
 
   const cargar = async () => {
     setLoading(true);
-    const { data: partidos } = await supabase.from('partidos').select('id,local,visitante,fecha,resultado_final').eq('jornada',parseInt(jornada as string)).order('fecha');
-    if (!partidos||partidos.length===0) { setFilas([]); setLoading(false); return; }
-    const { data: preds } = await supabase.from('predicciones').select('partido_id,resultado').eq('usuario_id',user!.id).in('partido_id',partidos.map(p=>p.id));
-    const predMap: Record<string,string> = {};
-    (preds||[]).forEach(p=>{ predMap[p.partido_id]=p.resultado; });
+    // Filtrar por jornada_id (UUID) — no por el numero viejo
+    const { data: partidos } = await supabase
+      .from('partidos')
+      .select('id,local,visitante,fecha,resultado_final')
+      .eq('jornada_id', jornada_id)
+      .order('fecha');
+    if (!partidos || partidos.length === 0) { setFilas([]); setLoading(false); return; }
+    const { data: preds } = await supabase
+      .from('predicciones')
+      .select('partido_id,resultado')
+      .eq('usuario_id', user!.id)
+      .in('partido_id', partidos.map(p => p.id));
+    const predMap: Record<string, string> = {};
+    (preds || []).forEach(p => { predMap[p.partido_id] = p.resultado; });
     const filasCalc: FilaPartido[] = partidos.map(p => {
-      const miPred = predMap[p.id]??null;
-      let acerto: boolean|null = null;
-      if (p.resultado_final!==null&&miPred!==null) acerto = p.resultado_final===miPred;
-      return { id:p.id, local:p.local, visitante:p.visitante, fecha:p.fecha, resultado_final:p.resultado_final, mi_prediccion:miPred, acerto };
+      const miPred = predMap[p.id] ?? null;
+      let acerto: boolean | null = null;
+      if (p.resultado_final !== null && miPred !== null) acerto = p.resultado_final === miPred;
+      return { id: p.id, local: p.local, visitante: p.visitante, fecha: p.fecha, resultado_final: p.resultado_final, mi_prediccion: miPred, acerto };
     });
-    const jugados = filasCalc.filter(f=>f.acerto!==null);
-    setAciertos(jugados.filter(f=>f.acerto===true).length);
+    const jugados = filasCalc.filter(f => f.acerto !== null);
+    setAciertos(jugados.filter(f => f.acerto === true).length);
     setTotal(jugados.length);
     setFilas(filasCalc);
     setLoading(false);
   };
 
-  const etiqueta = (val:string|null, local:string, visitante:string) => {
+  const etiqueta = (val: string | null) => {
     if (!val) return '—';
-    if (val==='1') return `Local`;
-    if (val==='X') return 'Empate';
-    if (val==='2') return `Visitante`;
+    if (val === '1') return 'Local';
+    if (val === 'X') return 'Empate';
+    if (val === '2') return 'Visitante';
     return val;
   };
 
-  const porcentaje = total>0?Math.round((aciertos/total)*100):0;
+  const porcentaje = total > 0 ? Math.round((aciertos / total) * 100) : 0;
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-      {/* Header */}
-      <View style={[styles.header,{paddingTop:insets.top+12}]}>
-        <TouchableOpacity onPress={()=>router.back()} style={styles.backBtn}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text}/>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Jornada {jornada}</Text>
-        <View style={{width:40}}/>
+        <Text style={styles.headerTitle} numberOfLines={1}>{jornada_nombre || 'Mis pronósticos'}</Text>
+        <View style={{ width: 40 }}/>
       </View>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Resumen */}
-          {total>0 && (
+          {total > 0 && (
             <View style={styles.resumen}>
               <View style={styles.resumenItem}>
                 <Text style={styles.resumenNum}>{aciertos}</Text>
@@ -77,49 +84,49 @@ export default function MisPronosticosScreen() {
               </View>
               <View style={styles.resumenDivider}/>
               <View style={styles.resumenItem}>
-                <Text style={[styles.resumenNum,{color:porcentaje>=50?C.green:C.orange}]}>{porcentaje}%</Text>
+                <Text style={[styles.resumenNum, { color: porcentaje >= 50 ? C.green : C.orange }]}>{porcentaje}%</Text>
                 <Text style={styles.resumenLabel}>Efectividad</Text>
               </View>
               <View style={styles.resumenDivider}/>
               <View style={styles.resumenItem}>
-                <Text style={styles.resumenNum}>{filas.length-total}</Text>
+                <Text style={styles.resumenNum}>{filas.length - total}</Text>
                 <Text style={styles.resumenLabel}>Pendientes</Text>
               </View>
             </View>
           )}
 
-          {filas.length===0 ? (
+          {filas.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={{fontSize:48,marginBottom:12}}>🏠</Text>
+              <Text style={{ fontSize: 48, marginBottom: 12 }}>🏠</Text>
               <Text style={styles.emptyTexto}>No se encontraron partidos para esta jornada.</Text>
             </View>
           ) : (
-            filas.map(f=>(
+            filas.map(f => (
               <View key={f.id} style={[
                 styles.card,
-                f.acerto===true&&styles.cardAcierto,
-                f.acerto===false&&styles.cardFallo,
+                f.acerto === true && styles.cardAcierto,
+                f.acerto === false && styles.cardFallo,
               ]}>
                 <View style={styles.iconoContainer}>
-                  {f.acerto===true  && <Ionicons name="checkmark-circle" size={26} color={C.green}/>}
-                  {f.acerto===false && <Ionicons name="close-circle"     size={26} color={C.red}/>}
-                  {f.acerto===null  && <Ionicons name="time-outline"     size={26} color={C.orange}/>}
+                  {f.acerto === true  && <Ionicons name="checkmark-circle" size={26} color={C.green}/>}
+                  {f.acerto === false && <Ionicons name="close-circle"     size={26} color={C.red}/>}
+                  {f.acerto === null  && <Ionicons name="time-outline"     size={26} color={C.orange}/>}
                 </View>
                 <View style={styles.cardBody}>
-                  <Text style={styles.cardFecha}>{new Date(f.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
+                  <Text style={styles.cardFecha}>{new Date(f.fecha).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</Text>
                   <Text style={styles.cardPartido}>{f.local} vs {f.visitante}</Text>
                   <View style={styles.comparacion}>
                     <View style={styles.comparacionItem}>
                       <Text style={styles.comparacionLabel}>Mi pronóstico</Text>
-                      <View style={[styles.badge, f.mi_prediccion?styles.badgePred:styles.badgeVacio]}>
-                        <Text style={styles.badgeTexto}>{etiqueta(f.mi_prediccion,f.local,f.visitante)}</Text>
+                      <View style={[styles.badge, f.mi_prediccion ? styles.badgePred : styles.badgeVacio]}>
+                        <Text style={styles.badgeTexto}>{etiqueta(f.mi_prediccion)}</Text>
                       </View>
                     </View>
-                    <Ionicons name="arrow-forward" size={16} color={C.textSub} style={{marginTop:18}}/>
+                    <Ionicons name="arrow-forward" size={16} color={C.textSub} style={{ marginTop: 18 }}/>
                     <View style={styles.comparacionItem}>
                       <Text style={styles.comparacionLabel}>Resultado real</Text>
-                      <View style={[styles.badge, f.resultado_final?styles.badgeReal:styles.badgePendiente]}>
-                        <Text style={[styles.badgeTexto,!f.resultado_final&&{color:C.orange}]}>{f.resultado_final?etiqueta(f.resultado_final,f.local,f.visitante):'Pendiente'}</Text>
+                      <View style={[styles.badge, f.resultado_final ? styles.badgeReal : styles.badgePendiente]}>
+                        <Text style={[styles.badgeTexto, !f.resultado_final && { color: C.orange }]}>{f.resultado_final ? etiqueta(f.resultado_final) : 'Pendiente'}</Text>
                       </View>
                     </View>
                   </View>
@@ -127,7 +134,7 @@ export default function MisPronosticosScreen() {
               </View>
             ))
           )}
-          <View style={{height:40}}/>
+          <View style={{ height: 40 }}/>
         </ScrollView>
       )}
     </View>
@@ -139,7 +146,7 @@ const styles = StyleSheet.create({
   center:{flex:1,justifyContent:'center',alignItems:'center'},
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
   backBtn:{padding:6,borderRadius:10,backgroundColor:C.card},
-  headerTitle:{color:C.text,fontSize:17,fontWeight:'bold',flex:1,textAlign:'center'},
+  headerTitle:{color:C.text,fontSize:17,fontWeight:'bold',flex:1,textAlign:'center',marginHorizontal:8},
   resumen:{flexDirection:'row',backgroundColor:C.card,marginHorizontal:16,marginBottom:12,borderRadius:14,padding:20,alignItems:'center',justifyContent:'space-around',borderWidth:1,borderColor:C.cardBorder},
   resumenItem:{alignItems:'center'},
   resumenNum:{color:C.accent,fontSize:28,fontWeight:'bold'},

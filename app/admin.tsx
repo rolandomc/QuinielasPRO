@@ -38,7 +38,6 @@ export default function AdminScreen() {
   const [partidos, setPartidos]   = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [jornadaSel, setJornadaSel] = useState<Jornada|null>(null);
   const [syncing, setSyncing]     = useState(false);
 
   const [modalNueva, setModalNueva] = useState(false);
@@ -72,7 +71,6 @@ export default function AdminScreen() {
     const [{ data:j },{ data:p },{ data:q }] = await Promise.all([
       supabase.from('jornadas').select('*').order('creado_at', { ascending:false }),
       supabase.from('partidos').select('*').order('fecha'),
-      // Fix: quinielas usa creado_en, no creado_at
       supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuarios(nombre,username)'),
     ]);
     if (j) setJornadas(j);
@@ -109,7 +107,7 @@ export default function AdminScreen() {
   const finalizarJornada = (j: Jornada) => {
     Alert.alert(
       'Finalizar jornada',
-      `¿Marcar "${j.nombre}" como FINALIZADA?\nSe abrirá espacio para que los usuarios participen en la siguiente.`,
+      `¿Marcar "${j.nombre}" como FINALIZADA?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Finalizar', onPress: async () => {
@@ -120,9 +118,32 @@ export default function AdminScreen() {
     );
   };
 
+  // ✨ NUEVA: borrar jornada y sus partidos/quinielas
+  const borrarJornada = (j: Jornada) => {
+    Alert.alert(
+      '⚠️ Borrar jornada',
+      `¿Eliminar "${j.nombre}" permanentemente?\n\nSe borrarán todos sus partidos, quinielas y predicciones. Esta acción NO se puede deshacer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Borrar', style: 'destructive', onPress: async () => {
+          // Borrar en cascada: predicciones → quinielas → partidos → jornada
+          const psIds = partidos.filter(p => p.jornada_id === j.id).map(p => p.id);
+          if (psIds.length > 0) {
+            await supabase.from('predicciones').delete().in('partido_id', psIds);
+          }
+          await supabase.from('quinielas').delete().eq('jornada_id', j.id);
+          await supabase.from('partidos').delete().eq('jornada_id', j.id);
+          await supabase.from('jornadas').delete().eq('id', j.id);
+          cargarDatos();
+          Alert.alert('🗑️ Jornada eliminada');
+        }},
+      ]
+    );
+  };
+
   const sincronizarResultados = async (j: Jornada) => {
     if (!j.api_competition_id || !j.api_season || !j.api_matchday) {
-      Alert.alert('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.\n\nEdita la jornada o usa resultados manuales.');
+      Alert.alert('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.');
       return;
     }
     setSyncing(true);
@@ -130,32 +151,26 @@ export default function AdminScreen() {
       const round = `Regular Season - ${j.api_matchday}`;
       const data  = await apifb.fixturesPorRound(j.api_competition_id, j.api_season, round);
       const matches: Fixture[] = data.response || [];
-      if (!matches.length) { Alert.alert('Sin datos', 'La API no devolvió partidos para esta jornada.'); setSyncing(false); return; }
+      if (!matches.length) { Alert.alert('Sin datos', 'La API no devolvió partidos.'); setSyncing(false); return; }
 
       const ps = partidos.filter(p => p.jornada_id === j.id && p.api_fixture_id);
       let actualizados = 0;
-
       for (const p of ps) {
         const match = matches.find(m => m.fixture.id === p.api_fixture_id);
         if (!match) continue;
         const { goals } = match as any;
         if (goals?.home == null || goals?.away == null) continue;
         if (match.fixture.status.short !== 'FT') continue;
-
         const home = goals.home as number;
         const away = goals.away as number;
         const res  = home > away ? '1' : away > home ? '2' : 'X';
-
         await supabase.from('partidos').update({ resultado_final: res, cerrado: true }).eq('id', p.id);
         actualizados++;
       }
-
       if (actualizados > 0) await recalcularAciertos(j.id);
       cargarDatos();
       Alert.alert('✅ Sincronizado', `${actualizados} resultado(s) actualizados.`);
-    } catch (e) {
-      Alert.alert('Error', String(e));
-    }
+    } catch (e) { Alert.alert('Error', String(e)); }
     setSyncing(false);
   };
 
@@ -292,8 +307,14 @@ export default function AdminScreen() {
                       <Text style={styles.jornadaNombre}>{j.nombre}</Text>
                       <Text style={styles.jornadaInfo}>{pJ.length} partidos · {conRes}/{pJ.length} resultados</Text>
                     </View>
-                    <View style={[styles.estadoBadge,{borderColor:estadoColor(j.estado)}]}>
-                      <Text style={[styles.estadoTexto,{color:estadoColor(j.estado)}]}>{j.estado.toUpperCase()}</Text>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8}}>
+                      <View style={[styles.estadoBadge,{borderColor:estadoColor(j.estado)}]}>
+                        <Text style={[styles.estadoTexto,{color:estadoColor(j.estado)}]}>{j.estado.toUpperCase()}</Text>
+                      </View>
+                      {/* Botón borrar */}
+                      <TouchableOpacity onPress={()=>borrarJornada(j)} style={styles.btnTrash}>
+                        <Ionicons name="trash-outline" size={16} color={C.red}/>
+                      </TouchableOpacity>
                     </View>
                   </View>
 
@@ -523,6 +544,7 @@ const styles = StyleSheet.create({
   jornadaHeader:{flexDirection:'row',alignItems:'flex-start',marginBottom:12},
   jornadaNombre:{color:C.text,fontWeight:'bold',fontSize:15}, jornadaInfo:{color:C.textSub,fontSize:11,marginTop:2},
   estadoBadge:{borderWidth:1.5,borderRadius:8,paddingHorizontal:8,paddingVertical:3}, estadoTexto:{fontSize:10,fontWeight:'800'},
+  btnTrash:{padding:6,borderRadius:8,borderWidth:1,borderColor:'rgba(255,107,107,0.3)',backgroundColor:'rgba(255,107,107,0.07)'},
   partidoRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderTopWidth:1,borderTopColor:C.cardBorder},
   partidoTexto:{color:C.text,fontSize:13,fontWeight:'600'}, partidoFecha:{color:C.textSub,fontSize:11,marginTop:1},
   resBadge:{backgroundColor:C.accentDim,borderRadius:6,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:C.accent},
