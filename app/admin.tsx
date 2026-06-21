@@ -1,51 +1,50 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, ActivityIndicator, Modal, StatusBar, Switch, FlatList,
+  Alert, ActivityIndicator, Modal, StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { apifb } from '../lib/apiFootball';
+import { apifb, mejorTemporada } from '../lib/apiFootball';
 
 const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700' };
 
 type Partido = { id:string; local:string; visitante:string; fecha:string; jornada:number; cerrado:boolean; resultado_final:string|null };
 type Quiniela = { id:string; jornada:number; estado_pago:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
-type Liga = { league:{id:number;name:string;logo:string}; country:{name:string;flag:string}; seasons:{year:number;current:boolean}[] };
-type Fixture = { fixture:{id:number;date:string;status:{short:string;elapsed:number|null}}; teams:{home:{name:string};away:{name:string}}; goals:{home:number|null;away:number|null} };
-
+type Liga = { league:{id:number;name:string;logo:string}; country:{name:string}; seasons:{year:number;current:boolean}[] };
+type Fixture = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}} };
 type TabAdmin = 'partidos' | 'importar' | 'quinielas';
 
 export default function AdminScreen() {
   const { usuario } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-
-  // Tabs
   const [tab, setTab] = useState<TabAdmin>('partidos');
-
-  // DB data
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Modales manuales
+  // Modal partido manual
   const [modalPartido, setModalPartido] = useState(false);
   const [modalResultado, setModalResultado] = useState(false);
   const [partidoSel, setPartidoSel] = useState<Partido|null>(null);
   const [resultadoInput, setResultadoInput] = useState<'1'|'X'|'2'|null>(null);
   const [saving, setSaving] = useState(false);
-  const [local,setLocal]=useState(''); const [visitante,setVisitante]=useState('');
-  const [fecha,setFecha]=useState(''); const [hora,setHora]=useState(''); const [jornada,setJornada]=useState('1');
+  const [local,setLocal]=useState('');
+  const [visitante,setVisitante]=useState('');
+  const [fecha,setFecha]=useState('');
+  const [hora,setHora]=useState('');
+  const [jornada,setJornada]=useState('1');
 
-  // API Football — importar
+  // Importar
   const [busquedaLiga, setBusquedaLiga] = useState('');
   const [ligas, setLigas] = useState<Liga[]>([]);
   const [loadingLigas, setLoadingLigas] = useState(false);
   const [ligaSel, setLigaSel] = useState<Liga|null>(null);
+  const [temporadaSel, setTemporadaSel] = useState<string>('');
   const [modoBusqueda, setModoBusqueda] = useState<'dia'|'semana'>('dia');
   const [fechaBusqueda, setFechaBusqueda] = useState(new Date().toISOString().split('T')[0]);
   const [fechaDesde, setFechaDesde] = useState('');
@@ -72,29 +71,38 @@ export default function AdminScreen() {
     setLoading(false);
   };
 
-  // ── API Football ──────────────────────────────────────────
+  // ── API Football ──────────────────────────────────────
   const buscarLigas = async () => {
     if (!busquedaLiga.trim()) return;
-    setLoadingLigas(true); setLigas([]);
+    setLoadingLigas(true); setLigas([]); setLigaSel(null); setFixtures([]);
     try {
       const data = await apifb.ligas(busquedaLiga.trim());
       setLigas(data.response || []);
+      if (!data.response?.length) Alert.alert('Sin resultados','Prueba otro nombre de liga.');
     } catch { Alert.alert('Error','No se pudo conectar con la API.'); }
     setLoadingLigas(false);
+  };
+
+  const seleccionarLiga = (l: Liga) => {
+    setLigaSel(l);
+    const t = mejorTemporada(l.seasons);
+    setTemporadaSel(t);
+    setFixtures([]);
+    setSeleccionados(new Set());
   };
 
   const buscarFixtures = async () => {
     if (!ligaSel) return;
     setLoadingFixtures(true); setFixtures([]); setSeleccionados(new Set());
-    const season = ligaSel.seasons.find(s=>s.current)?.year.toString() ?? new Date().getFullYear().toString();
     try {
       let data;
       if (modoBusqueda==='dia') {
-        data = await apifb.fixtures(String(ligaSel.league.id), season, fechaBusqueda);
+        data = await apifb.fixtures(String(ligaSel.league.id), temporadaSel, fechaBusqueda);
       } else {
-        data = await apifb.fixturesPorSemana(String(ligaSel.league.id), season, fechaDesde, fechaHasta);
+        data = await apifb.fixturesPorSemana(String(ligaSel.league.id), temporadaSel, fechaDesde, fechaHasta);
       }
       setFixtures(data.response || []);
+      if (!data.response?.length) Alert.alert('Sin partidos',`No hay partidos en esa fecha para ${ligaSel.league.name} (temporada ${temporadaSel}).`);
     } catch { Alert.alert('Error','No se pudieron cargar los partidos.'); }
     setLoadingFixtures(false);
   };
@@ -106,24 +114,18 @@ export default function AdminScreen() {
   const importarPartidos = async () => {
     if (seleccionados.size===0) { Alert.alert('Sin selección','Selecciona al menos un partido.'); return; }
     setImportando(true);
-    const selArr = fixtures.filter(f=>seleccionados.has(f.fixture.id));
-    const inserts = selArr.map(f => ({
-      local: f.teams.home.name,
-      visitante: f.teams.away.name,
-      fecha: f.fixture.date,
-      jornada: parseInt(jornadaImport),
-      cerrado: false,
-      api_fixture_id: f.fixture.id,
-    }));
+    const inserts = fixtures
+      .filter(f=>seleccionados.has(f.fixture.id))
+      .map(f => ({ local:f.teams.home.name, visitante:f.teams.away.name, fecha:f.fixture.date, jornada:parseInt(jornadaImport), cerrado:false, api_fixture_id:f.fixture.id }));
     const { error } = await supabase.from('partidos').insert(inserts);
     setImportando(false);
     if (error) { Alert.alert('Error al importar', error.message); return; }
-    Alert.alert('\u2705 Importados', `${inserts.length} partido(s) agregados a la Jornada ${jornadaImport}.`);
-    setSeleccionados(new Set()); setFixtures([]); setLigaSel(null);
+    Alert.alert('✅ Importados', `${inserts.length} partido(s) agregados a la Jornada ${jornadaImport}.`);
+    setSeleccionados(new Set()); setFixtures([]); setLigaSel(null); setLigas([]);
     setTab('partidos'); cargarDatos();
   };
 
-  // ── Resultados manuales ───────────────────────────────────
+  // ── Resultados ────────────────────────────────────────
   const guardarResultado = async () => {
     if (!resultadoInput||!partidoSel) return;
     setSaving(true);
@@ -131,19 +133,17 @@ export default function AdminScreen() {
     if (error) { Alert.alert('Error',error.message); setSaving(false); return; }
     await recalcularAciertos(partidoSel.jornada);
     setSaving(false); setModalResultado(false); cargarDatos();
-    Alert.alert('\u2705 Listo','Resultado guardado y aciertos recalculados.');
+    Alert.alert('✅ Listo','Resultado guardado y aciertos recalculados.');
   };
 
   const recalcularAciertos = async (jornadaNum:number) => {
     const { data:pJs } = await supabase.from('partidos').select('id,resultado_final').eq('jornada',jornadaNum).not('resultado_final','is',null);
-    if (!pJs||pJs.length===0) return;
+    if (!pJs||!pJs.length) return;
     const ids = pJs.map(p=>p.id);
     const { data:qJs } = await supabase.from('quinielas').select('id,usuario_id').eq('jornada',jornadaNum);
-    if (!qJs||qJs.length===0) return;
-    for (const q of qJs) {
+    for (const q of (qJs||[])) {
       const { data:preds } = await supabase.from('predicciones').select('partido_id,resultado').eq('usuario_id',q.usuario_id).in('partido_id',ids);
-      let aciertos=0;
-      for (const pred of (preds||[])) { const p=pJs.find(x=>x.id===pred.partido_id); if (p?.resultado_final===pred.resultado) aciertos++; }
+      const aciertos = (preds||[]).filter(pr=>pJs.find(x=>x.id===pr.partido_id)?.resultado_final===pr.resultado).length;
       await supabase.from('quinielas').update({aciertos}).eq('id',q.id);
     }
   };
@@ -154,12 +154,11 @@ export default function AdminScreen() {
     const { error } = await supabase.from('partidos').insert({ local:local.trim(), visitante:visitante.trim(), fecha:`${fecha}T${hora}:00-06:00`, jornada:parseInt(jornada), cerrado:false });
     setSaving(false);
     if (error) { Alert.alert('Error',error.message); return; }
-    setModalPartido(false); setLocal(''); setVisitante(''); setFecha(''); setHora('');
-    cargarDatos();
+    setModalPartido(false); setLocal(''); setVisitante(''); setFecha(''); setHora(''); cargarDatos();
   };
 
   const toggleCerrar = async (p:Partido) => { await supabase.from('partidos').update({cerrado:!p.cerrado}).eq('id',p.id); cargarDatos(); };
-  const eliminarPartido = (id:string) => Alert.alert('Eliminar','\u00bfEliminar este partido?',[{text:'Cancelar',style:'cancel'},{text:'Eliminar',style:'destructive',onPress:async()=>{await supabase.from('partidos').delete().eq('id',id);cargarDatos();}}]);
+  const eliminarPartido = (id:string) => Alert.alert('Eliminar','¿Eliminar este partido?',[{text:'Cancelar',style:'cancel'},{text:'Eliminar',style:'destructive',onPress:async()=>{await supabase.from('partidos').delete().eq('id',id);cargarDatos();}}]);
   const marcarPagado = async (qId:string) => { const{error}=await supabase.from('quinielas').update({estado_pago:'pagado'}).eq('id',qId); if(error)Alert.alert('Error',error.message); else cargarDatos(); };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
@@ -167,9 +166,7 @@ export default function AdminScreen() {
   const jornadaActual = partidos.find(p=>!p.cerrado)?.jornada??'-';
   const pagados = quinielas.filter(q=>q.estado_pago==='pagado').length;
   const pendientes = quinielas.filter(q=>q.estado_pago==='pendiente').length;
-
   const statusColor = (s:string) => s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
-  const statusLabel = (s:string) => s==='FT'?'Finalizado':s==='NS'?'No iniciado':s==='HT'?'Medio tiempo':`En vivo`;
 
   return (
     <View style={styles.root}>
@@ -182,7 +179,6 @@ export default function AdminScreen() {
         <View style={{width:40}}/>
       </View>
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}><Text style={styles.statNum}>{jornadaActual}</Text><Text style={styles.statLabel}>Jornada</Text></View>
         <View style={styles.stat}><Text style={[styles.statNum,{color:C.green}]}>{pagados}</Text><Text style={styles.statLabel}>Pagados</Text></View>
@@ -190,7 +186,6 @@ export default function AdminScreen() {
         <View style={styles.stat}><Text style={styles.statNum}>{quinielas.length}</Text><Text style={styles.statLabel}>Total</Text></View>
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabs}>
         {(['partidos','importar','quinielas'] as TabAdmin[]).map(t=>(
           <TouchableOpacity key={t} style={[styles.tabBtn,tab===t&&styles.tabActivo]} onPress={()=>setTab(t)}>
@@ -203,29 +198,29 @@ export default function AdminScreen() {
 
       <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* ── TAB PARTIDOS ── */}
+        {/* TAB PARTIDOS */}
         {tab==='partidos' && (
           <>
             <TouchableOpacity style={styles.btnAgregar} onPress={()=>setModalPartido(true)} activeOpacity={0.8}>
-              <Ionicons name="add-circle" size={20} color="#fff"/>
+              <Ionicons name="add-circle" size={20} color={C.textSub}/>
               <Text style={styles.btnAgregarTexto}>Agregar partido manualmente</Text>
             </TouchableOpacity>
             {partidos.length===0 ? (
               <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay partidos. Importa desde la API o agrega manualmente.</Text></View>
             ) : partidos.map(p=>(
               <View key={p.id} style={styles.card}>
-                <Text style={styles.cardJornada}>Jornada {p.jornada} {p.cerrado&&<Text style={{color:C.red}}> • Cerrado</Text>}</Text>
+                <Text style={styles.cardJornada}>Jornada {p.jornada}{p.cerrado&&<Text style={{color:C.red}}> • Cerrado</Text>}</Text>
                 <Text style={styles.cardPartido}>{p.local} vs {p.visitante}</Text>
                 <Text style={styles.cardFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
                 {p.resultado_final&&(
                   <View style={styles.resultadoTag}>
                     <Ionicons name="checkmark-circle" size={13} color={C.green}/>
-                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local gana: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante gana: ${p.visitante}`}</Text>
+                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante: ${p.visitante}`}</Text>
                   </View>
                 )}
                 <View style={styles.cardActions}>
                   <TouchableOpacity onPress={()=>{setPartidoSel(p);setResultadoInput(p.resultado_final as any||null);setModalResultado(true);}} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
-                    <Text style={styles.actionBtnTexto}>{p.resultado_final?'\u270f\ufe0f Editar':'🎯 Resultado'}</Text>
+                    <Text style={styles.actionBtnTexto}>{p.resultado_final?'✏️ Editar':'🎯 Resultado'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={()=>toggleCerrar(p)} style={[styles.actionBtn,p.cerrado?{backgroundColor:C.green}:{backgroundColor:C.orange}]}>
                     <Text style={styles.actionBtnTexto}>{p.cerrado?'Abrir':'Cerrar'}</Text>
@@ -239,12 +234,13 @@ export default function AdminScreen() {
           </>
         )}
 
-        {/* ── TAB IMPORTAR ── */}
+        {/* TAB IMPORTAR */}
         {tab==='importar' && (
           <View style={{padding:16}}>
+
             {/* Paso 1 — Buscar liga */}
             <View style={styles.pasoCard}>
-              <Text style={styles.pasoNum}>1</Text>
+              <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>1</Text></View>
               <View style={{flex:1}}>
                 <Text style={styles.pasoTitulo}>Buscar liga</Text>
                 <View style={styles.searchRow}>
@@ -252,9 +248,10 @@ export default function AdminScreen() {
                     style={[styles.input,{flex:1,marginBottom:0}]}
                     value={busquedaLiga}
                     onChangeText={setBusquedaLiga}
-                    placeholder="Liga MX, Premier League..."
+                    placeholder="Liga MX, Premier League, La Liga..."
                     placeholderTextColor="#555577"
                     onSubmitEditing={buscarLigas}
+                    returnKeyType="search"
                   />
                   <TouchableOpacity style={styles.btnSearch} onPress={buscarLigas} activeOpacity={0.8}>
                     {loadingLigas?<ActivityIndicator color="#fff" size="small"/>:<Ionicons name="search" size={18} color="#fff"/>}
@@ -263,15 +260,18 @@ export default function AdminScreen() {
 
                 {ligas.length>0 && (
                   <ScrollView style={styles.ligasLista} nestedScrollEnabled>
-                    {ligas.map(l=>(
-                      <TouchableOpacity key={l.league.id} style={[styles.ligaRow, ligaSel?.league.id===l.league.id&&styles.ligaRowActiva]} onPress={()=>setLigaSel(l)} activeOpacity={0.7}>
-                        <View style={{flex:1}}>
-                          <Text style={styles.ligaNombre}>{l.league.name}</Text>
-                          <Text style={styles.ligaPais}>{l.country.name} • {l.seasons.find(s=>s.current)?.year}</Text>
-                        </View>
-                        {ligaSel?.league.id===l.league.id && <Ionicons name="checkmark-circle" size={20} color={C.accent}/>}
-                      </TouchableOpacity>
-                    ))}
+                    {ligas.map(l=>{
+                      const t = mejorTemporada(l.seasons);
+                      return (
+                        <TouchableOpacity key={l.league.id} style={[styles.ligaRow,ligaSel?.league.id===l.league.id&&styles.ligaRowActiva]} onPress={()=>seleccionarLiga(l)} activeOpacity={0.7}>
+                          <View style={{flex:1}}>
+                            <Text style={styles.ligaNombre}>{l.league.name}</Text>
+                            <Text style={styles.ligaPais}>{l.country.name} · Temporada {t}</Text>
+                          </View>
+                          {ligaSel?.league.id===l.league.id && <Ionicons name="checkmark-circle" size={20} color={C.accent}/>}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </ScrollView>
                 )}
               </View>
@@ -280,9 +280,22 @@ export default function AdminScreen() {
             {/* Paso 2 — Buscar partidos */}
             {ligaSel && (
               <View style={styles.pasoCard}>
-                <Text style={styles.pasoNum}>2</Text>
+                <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>2</Text></View>
                 <View style={{flex:1}}>
-                  <Text style={styles.pasoTitulo}>Buscar partidos — {ligaSel.league.name}</Text>
+                  <Text style={styles.pasoTitulo}>{ligaSel.league.name}</Text>
+
+                  {/* Selector de temporada */}
+                  <Text style={styles.label}>Temporada</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:12}}>
+                    <View style={{flexDirection:'row',gap:8}}>
+                      {[...ligaSel.seasons].sort((a,b)=>b.year-a.year).slice(0,5).map(s=>(
+                        <TouchableOpacity key={s.year} style={[styles.temporadaBtn,temporadaSel===String(s.year)&&styles.temporadaBtnActiva]} onPress={()=>setTemporadaSel(String(s.year))}>
+                          <Text style={[styles.temporadaTexto,temporadaSel===String(s.year)&&{color:C.accent}]}>{s.year}{s.current?' ★':''}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+
                   <View style={styles.modoRow}>
                     <TouchableOpacity style={[styles.modoBtn,modoBusqueda==='dia'&&styles.modoBtnActivo]} onPress={()=>setModoBusqueda('dia')}>
                       <Text style={[styles.modoBtnTexto,modoBusqueda==='dia'&&{color:C.accent}]}>Por día</Text>
@@ -303,18 +316,30 @@ export default function AdminScreen() {
                   )}
 
                   <TouchableOpacity style={styles.btnBuscarFixtures} onPress={buscarFixtures} activeOpacity={0.8}>
-                    {loadingFixtures?<ActivityIndicator color="#fff" size="small"/>:<><Ionicons name="football" size={16} color="#fff"/><Text style={styles.btnBuscarFixturesTexto}>Ver partidos</Text></>}
+                    {loadingFixtures
+                      ? <ActivityIndicator color="#fff" size="small"/>
+                      : <><Ionicons name="football" size={16} color="#fff"/><Text style={styles.btnBuscarFixturesTexto}>Ver partidos</Text></>}
                   </TouchableOpacity>
                 </View>
               </View>
             )}
 
-            {/* Paso 3 — Seleccionar partidos */}
+            {/* Paso 3 — Seleccionar */}
             {fixtures.length>0 && (
               <View style={styles.pasoCard}>
-                <Text style={styles.pasoNum}>3</Text>
+                <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>3</Text></View>
                 <View style={{flex:1}}>
-                  <Text style={styles.pasoTitulo}>Seleccionar partidos ({seleccionados.size} elegidos)</Text>
+                  <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                    <Text style={styles.pasoTitulo}>Seleccionar partidos</Text>
+                    <TouchableOpacity onPress={()=>{
+                      if (seleccionados.size===fixtures.length) setSeleccionados(new Set());
+                      else setSeleccionados(new Set(fixtures.map(f=>f.fixture.id)));
+                    }}>
+                      <Text style={{color:C.accent,fontSize:12,fontWeight:'700'}}>
+                        {seleccionados.size===fixtures.length?'Quitar todos':'Seleccionar todos'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                   {fixtures.map(f=>{
                     const sel = seleccionados.has(f.fixture.id);
                     const st = f.fixture.status.short;
@@ -337,52 +362,43 @@ export default function AdminScreen() {
               </View>
             )}
 
-            {/* Paso 4 — Crear quiniela */}
+            {/* Paso 4 — Crear */}
             {seleccionados.size>0 && (
               <View style={styles.pasoCard}>
-                <Text style={styles.pasoNum}>4</Text>
+                <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>4</Text></View>
                 <View style={{flex:1}}>
                   <Text style={styles.pasoTitulo}>Crear quiniela</Text>
                   <Text style={styles.label}>Número de jornada</Text>
                   <TextInput style={styles.input} value={jornadaImport} onChangeText={setJornadaImport} keyboardType="number-pad" placeholderTextColor="#555577"/>
                   <TouchableOpacity style={[styles.btnImportar,importando&&{opacity:0.6}]} onPress={importarPartidos} disabled={importando} activeOpacity={0.8}>
-                    {importando?<ActivityIndicator color="#fff"/>:<><Ionicons name="cloud-upload" size={18} color="#fff"/><Text style={styles.btnImportarTexto}>Crear Jornada {jornadaImport} ({seleccionados.size} partidos)</Text></>}
+                    {importando
+                      ? <ActivityIndicator color="#fff"/>
+                      : <><Ionicons name="cloud-upload" size={18} color="#fff"/><Text style={styles.btnImportarTexto}>Crear Jornada {jornadaImport} ({seleccionados.size} partidos)</Text></>}
                   </TouchableOpacity>
                 </View>
               </View>
             )}
-
-            {fixtures.length===0&&!loadingFixtures&&ligaSel&&(
-              <View style={styles.emptyBox}><Text style={styles.emptyText}>No se encontraron partidos. Prueba otra fecha.</Text></View>
-            )}
           </View>
         )}
 
-        {/* ── TAB QUINIELAS ── */}
+        {/* TAB QUINIELAS */}
         {tab==='quinielas' && (
-          quinielas.length===0 ? (
-            <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas aún.</Text></View>
-          ) : (
-            quinielas.map(q=>(
+          quinielas.length===0
+            ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas aún.</Text></View>
+            : quinielas.map(q=>(
               <View key={q.id} style={styles.card}>
                 <View style={styles.cardRow}>
                   <View style={{flex:1}}>
                     <Text style={styles.cardPartido}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
                     <Text style={styles.cardJornada}>Jornada {q.jornada}</Text>
                   </View>
-                  {q.estado_pago==='pagado' ? (
-                    <View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}>
-                      <Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text>
-                    </View>
-                  ) : (
-                    <TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
-                      <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
-                    </TouchableOpacity>
-                  )}
+                  {q.estado_pago==='pagado'
+                    ? <View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}><Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text></View>
+                    : <TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}><Text style={styles.actionBtnTexto}>Marcar pagado</Text></TouchableOpacity>
+                  }
                 </View>
               </View>
             ))
-          )
         )}
         <View style={{height:60}}/>
       </ScrollView>
@@ -392,7 +408,7 @@ export default function AdminScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitulo}>Nuevo partido</Text>
-            {([['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']] as const).map(([lbl,val,set,ph]: any)=>(
+            {([['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']] as const).map(([lbl,val,set,ph]:any)=>(
               <View key={lbl}><Text style={styles.label}>{lbl}</Text><TextInput style={styles.input} value={val} onChangeText={set} placeholder={ph} placeholderTextColor="#555577"/></View>
             ))}
             <Text style={styles.label}>Jornada</Text>
@@ -462,17 +478,20 @@ const styles = StyleSheet.create({
   actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
   emptyBox:{margin:16,padding:20,backgroundColor:C.card,borderRadius:12,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
   emptyText:{color:C.textSub,fontSize:14,textAlign:'center'},
-  // Importar
   pasoCard:{backgroundColor:C.card,borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.cardBorder,flexDirection:'row',gap:12},
-  pasoNum:{width:28,height:28,borderRadius:14,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent,textAlign:'center',lineHeight:28,color:C.accent,fontWeight:'bold',fontSize:14},
+  pasoNumWrap:{width:28,height:28,borderRadius:14,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent,justifyContent:'center',alignItems:'center'},
+  pasoNum:{color:C.accent,fontWeight:'bold',fontSize:14},
   pasoTitulo:{color:C.text,fontWeight:'bold',fontSize:14,marginBottom:12},
   searchRow:{flexDirection:'row',gap:8},
   btnSearch:{backgroundColor:C.accent,paddingHorizontal:14,paddingVertical:12,borderRadius:10,justifyContent:'center',alignItems:'center'},
-  ligasLista:{maxHeight:200,marginTop:10,borderRadius:10,borderWidth:1,borderColor:C.cardBorder},
+  ligasLista:{maxHeight:220,marginTop:10,borderRadius:10,borderWidth:1,borderColor:C.cardBorder},
   ligaRow:{flexDirection:'row',alignItems:'center',padding:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
   ligaRowActiva:{backgroundColor:C.accentDim},
   ligaNombre:{color:C.text,fontWeight:'600',fontSize:13},
   ligaPais:{color:C.textSub,fontSize:11,marginTop:2},
+  temporadaBtn:{paddingHorizontal:14,paddingVertical:7,borderRadius:20,borderWidth:1.5,borderColor:C.cardBorder,backgroundColor:'#12121f'},
+  temporadaBtnActiva:{borderColor:C.accent,backgroundColor:C.accentDim},
+  temporadaTexto:{color:C.textSub,fontWeight:'700',fontSize:12},
   modoRow:{flexDirection:'row',gap:8,marginBottom:12},
   modoBtn:{flex:1,padding:9,borderRadius:10,borderWidth:1.5,borderColor:C.cardBorder,alignItems:'center'},
   modoBtnActivo:{borderColor:C.accent,backgroundColor:C.accentDim},
@@ -489,7 +508,6 @@ const styles = StyleSheet.create({
   statusTexto:{fontSize:10,fontWeight:'700'},
   btnImportar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:C.green,padding:15,borderRadius:12,marginTop:4},
   btnImportarTexto:{color:'#fff',fontWeight:'bold',fontSize:15},
-  // Modales
   modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
   modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,borderTopWidth:1,borderColor:C.cardBorder},
   modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4},
