@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, ActivityIndicator, Modal, StatusBar,
+  Alert, ActivityIndicator, Modal, StatusBar, KeyboardAvoidingView,
+  Platform, FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8'
 
 type Partido = { id:string; local:string; visitante:string; fecha:string; jornada:number; cerrado:boolean; resultado_final:string|null };
 type Quiniela = { id:string; jornada:number; estado_pago:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
-type Liga = { league:{id:number;name:string;logo:string}; country:{name:string}; seasons:{year:number;current:boolean}[] };
+type Liga = { league:{id:number;name:string;type:string}; country:{name:string}; seasons:{year:number;current:boolean}[] };
 type Fixture = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}} };
 type TabAdmin = 'partidos' | 'importar' | 'quinielas';
 
@@ -45,6 +46,7 @@ export default function AdminScreen() {
   const [loadingLigas, setLoadingLigas] = useState(false);
   const [ligaSel, setLigaSel] = useState<Liga|null>(null);
   const [temporadaSel, setTemporadaSel] = useState<string>('');
+  const [temporadaManual, setTemporadaManual] = useState('');
   const [modoBusqueda, setModoBusqueda] = useState<'dia'|'semana'>('dia');
   const [fechaBusqueda, setFechaBusqueda] = useState(new Date().toISOString().split('T')[0]);
   const [fechaDesde, setFechaDesde] = useState('');
@@ -71,14 +73,19 @@ export default function AdminScreen() {
     setLoading(false);
   };
 
-  // ── API Football ──────────────────────────────────────
+  // ── API Football ──────────────────────────────────────────
   const buscarLigas = async () => {
-    if (!busquedaLiga.trim()) return;
+    const q = busquedaLiga.trim();
+    if (!q) return;
     setLoadingLigas(true); setLigas([]); setLigaSel(null); setFixtures([]);
     try {
-      const data = await apifb.ligas(busquedaLiga.trim());
-      setLigas(data.response || []);
-      if (!data.response?.length) Alert.alert('Sin resultados','Prueba otro nombre de liga.');
+      // Busca sin filtro de season para incluir Ligas Y Copas
+      const data = await apifb.ligas(q);
+      const res: Liga[] = data.response || [];
+      if (!res.length) {
+        Alert.alert('Sin resultados', `No se encontró "${q}".\n\nSugerencias:\n• "Liga MX Apertura"\n• "Liga MX Clausura"\n• "FIFA World Cup"\n• "UEFA Champions League"`);
+      }
+      setLigas(res);
     } catch { Alert.alert('Error','No se pudo conectar con la API.'); }
     setLoadingLigas(false);
   };
@@ -87,22 +94,32 @@ export default function AdminScreen() {
     setLigaSel(l);
     const t = mejorTemporada(l.seasons);
     setTemporadaSel(t);
+    setTemporadaManual(t);
     setFixtures([]);
     setSeleccionados(new Set());
   };
 
+  const temporadaFinal = temporadaManual.length === 4 ? temporadaManual : temporadaSel;
+
   const buscarFixtures = async () => {
     if (!ligaSel) return;
+    if (!temporadaFinal) { Alert.alert('Falta temporada','Ingresa el año de la temporada.'); return; }
     setLoadingFixtures(true); setFixtures([]); setSeleccionados(new Set());
     try {
       let data;
-      if (modoBusqueda==='dia') {
-        data = await apifb.fixtures(String(ligaSel.league.id), temporadaSel, fechaBusqueda);
+      if (modoBusqueda === 'dia') {
+        data = await apifb.fixtures(String(ligaSel.league.id), temporadaFinal, fechaBusqueda);
       } else {
-        data = await apifb.fixturesPorSemana(String(ligaSel.league.id), temporadaSel, fechaDesde, fechaHasta);
+        data = await apifb.fixturesPorSemana(String(ligaSel.league.id), temporadaFinal, fechaDesde, fechaHasta);
       }
-      setFixtures(data.response || []);
-      if (!data.response?.length) Alert.alert('Sin partidos',`No hay partidos en esa fecha para ${ligaSel.league.name} (temporada ${temporadaSel}).`);
+      const res: Fixture[] = data.response || [];
+      setFixtures(res);
+      if (!res.length) {
+        Alert.alert(
+          'Sin partidos',
+          `No hay partidos para:\n• ${ligaSel.league.name}\n• Temporada ${temporadaFinal}\n• ${modoBusqueda==='dia'?`Fecha: ${fechaBusqueda}`:`Del ${fechaDesde} al ${fechaHasta}`}\n\nIntenta con otra fecha o temporada.`
+        );
+      }
     } catch { Alert.alert('Error','No se pudieron cargar los partidos.'); }
     setLoadingFixtures(false);
   };
@@ -125,7 +142,7 @@ export default function AdminScreen() {
     setTab('partidos'); cargarDatos();
   };
 
-  // ── Resultados ────────────────────────────────────────
+  // ── Resultados ────────────────────────────────────────────
   const guardarResultado = async () => {
     if (!resultadoInput||!partidoSel) return;
     setSaving(true);
@@ -167,10 +184,16 @@ export default function AdminScreen() {
   const pagados = quinielas.filter(q=>q.estado_pago==='pagado').length;
   const pendientes = quinielas.filter(q=>q.estado_pago==='pendiente').length;
   const statusColor = (s:string) => s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
+  const tipoIcon = (t:string) => t==='Cup'?'🏆':'⚽';
 
   return (
-    <View style={styles.root}>
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS==='ios'?'padding':'height'}
+      keyboardVerticalOffset={0}
+    >
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
+
       <View style={[styles.header,{paddingTop:insets.top+12}]}>
         <TouchableOpacity onPress={()=>router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text}/>
@@ -196,106 +219,134 @@ export default function AdminScreen() {
         ))}
       </View>
 
-      <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-
-        {/* TAB PARTIDOS */}
+      <ScrollView
+        style={{flex:1}}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{paddingBottom: insets.bottom + 40}}
+      >
+        {/* ── TAB PARTIDOS ── */}
         {tab==='partidos' && (
           <>
             <TouchableOpacity style={styles.btnAgregar} onPress={()=>setModalPartido(true)} activeOpacity={0.8}>
               <Ionicons name="add-circle" size={20} color={C.textSub}/>
               <Text style={styles.btnAgregarTexto}>Agregar partido manualmente</Text>
             </TouchableOpacity>
-            {partidos.length===0 ? (
-              <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay partidos. Importa desde la API o agrega manualmente.</Text></View>
-            ) : partidos.map(p=>(
-              <View key={p.id} style={styles.card}>
-                <Text style={styles.cardJornada}>Jornada {p.jornada}{p.cerrado&&<Text style={{color:C.red}}> • Cerrado</Text>}</Text>
-                <Text style={styles.cardPartido}>{p.local} vs {p.visitante}</Text>
-                <Text style={styles.cardFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
-                {p.resultado_final&&(
-                  <View style={styles.resultadoTag}>
-                    <Ionicons name="checkmark-circle" size={13} color={C.green}/>
-                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante: ${p.visitante}`}</Text>
+            {partidos.length===0
+              ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay partidos. Importa desde la API o agrega manualmente.</Text></View>
+              : partidos.map(p=>(
+                <View key={p.id} style={styles.card}>
+                  <Text style={styles.cardJornada}>Jornada {p.jornada}{p.cerrado&&<Text style={{color:C.red}}> • Cerrado</Text>}</Text>
+                  <Text style={styles.cardPartido}>{p.local} vs {p.visitante}</Text>
+                  <Text style={styles.cardFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
+                  {p.resultado_final&&(
+                    <View style={styles.resultadoTag}>
+                      <Ionicons name="checkmark-circle" size={13} color={C.green}/>
+                      <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante: ${p.visitante}`}</Text>
+                    </View>
+                  )}
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity onPress={()=>{setPartidoSel(p);setResultadoInput(p.resultado_final as any||null);setModalResultado(true);}} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
+                      <Text style={styles.actionBtnTexto}>{p.resultado_final?'✏️ Editar':'🎯 Resultado'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={()=>toggleCerrar(p)} style={[styles.actionBtn,p.cerrado?{backgroundColor:C.green}:{backgroundColor:C.orange}]}>
+                      <Text style={styles.actionBtnTexto}>{p.cerrado?'Abrir':'Cerrar'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={()=>eliminarPartido(p.id)} style={[styles.actionBtn,{backgroundColor:C.red}]}>
+                      <Ionicons name="trash" size={14} color="#fff"/>
+                    </TouchableOpacity>
                   </View>
-                )}
-                <View style={styles.cardActions}>
-                  <TouchableOpacity onPress={()=>{setPartidoSel(p);setResultadoInput(p.resultado_final as any||null);setModalResultado(true);}} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
-                    <Text style={styles.actionBtnTexto}>{p.resultado_final?'✏️ Editar':'🎯 Resultado'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={()=>toggleCerrar(p)} style={[styles.actionBtn,p.cerrado?{backgroundColor:C.green}:{backgroundColor:C.orange}]}>
-                    <Text style={styles.actionBtnTexto}>{p.cerrado?'Abrir':'Cerrar'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={()=>eliminarPartido(p.id)} style={[styles.actionBtn,{backgroundColor:C.red}]}>
-                    <Ionicons name="trash" size={14} color="#fff"/>
-                  </TouchableOpacity>
                 </View>
-              </View>
-            ))}
+              ))
+            }
           </>
         )}
 
-        {/* TAB IMPORTAR */}
+        {/* ── TAB IMPORTAR ── */}
         {tab==='importar' && (
           <View style={{padding:16}}>
 
-            {/* Paso 1 — Buscar liga */}
+            {/* Paso 1 — Buscar */}
             <View style={styles.pasoCard}>
               <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>1</Text></View>
               <View style={{flex:1}}>
-                <Text style={styles.pasoTitulo}>Buscar liga</Text>
+                <Text style={styles.pasoTitulo}>Buscar liga o copa</Text>
+                <Text style={styles.hint}>Ej: Liga MX Apertura, FIFA World Cup, Champions League</Text>
                 <View style={styles.searchRow}>
                   <TextInput
                     style={[styles.input,{flex:1,marginBottom:0}]}
                     value={busquedaLiga}
                     onChangeText={setBusquedaLiga}
-                    placeholder="Liga MX, Premier League, La Liga..."
+                    placeholder="Liga MX Apertura..."
                     placeholderTextColor="#555577"
                     onSubmitEditing={buscarLigas}
                     returnKeyType="search"
                   />
                   <TouchableOpacity style={styles.btnSearch} onPress={buscarLigas} activeOpacity={0.8}>
-                    {loadingLigas?<ActivityIndicator color="#fff" size="small"/>:<Ionicons name="search" size={18} color="#fff"/>}
+                    {loadingLigas
+                      ? <ActivityIndicator color="#fff" size="small"/>
+                      : <Ionicons name="search" size={18} color="#fff"/>}
                   </TouchableOpacity>
                 </View>
 
                 {ligas.length>0 && (
-                  <ScrollView style={styles.ligasLista} nestedScrollEnabled>
+                  <View style={styles.ligasLista}>
                     {ligas.map(l=>{
                       const t = mejorTemporada(l.seasons);
                       return (
                         <TouchableOpacity key={l.league.id} style={[styles.ligaRow,ligaSel?.league.id===l.league.id&&styles.ligaRowActiva]} onPress={()=>seleccionarLiga(l)} activeOpacity={0.7}>
-                          <View style={{flex:1}}>
+                          <Text style={styles.ligaTipo}>{tipoIcon(l.league.type)}</Text>
+                          <View style={{flex:1,marginLeft:8}}>
                             <Text style={styles.ligaNombre}>{l.league.name}</Text>
-                            <Text style={styles.ligaPais}>{l.country.name} · Temporada {t}</Text>
+                            <Text style={styles.ligaPais}>{l.country.name} · {l.league.type} · {t}</Text>
                           </View>
                           {ligaSel?.league.id===l.league.id && <Ionicons name="checkmark-circle" size={20} color={C.accent}/>}
                         </TouchableOpacity>
                       );
                     })}
-                  </ScrollView>
+                  </View>
                 )}
               </View>
             </View>
 
-            {/* Paso 2 — Buscar partidos */}
+            {/* Paso 2 — Temporada y fecha */}
             {ligaSel && (
               <View style={styles.pasoCard}>
                 <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>2</Text></View>
                 <View style={{flex:1}}>
                   <Text style={styles.pasoTitulo}>{ligaSel.league.name}</Text>
 
-                  {/* Selector de temporada */}
+                  {/* Temporadas rápidas */}
                   <Text style={styles.label}>Temporada</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:12}}>
-                    <View style={{flexDirection:'row',gap:8}}>
-                      {[...ligaSel.seasons].sort((a,b)=>b.year-a.year).slice(0,5).map(s=>(
-                        <TouchableOpacity key={s.year} style={[styles.temporadaBtn,temporadaSel===String(s.year)&&styles.temporadaBtnActiva]} onPress={()=>setTemporadaSel(String(s.year))}>
-                          <Text style={[styles.temporadaTexto,temporadaSel===String(s.year)&&{color:C.accent}]}>{s.year}{s.current?' ★':''}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
+                    <View style={{flexDirection:'row',gap:6}}>
+                      {[...ligaSel.seasons].sort((a,b)=>b.year-a.year).slice(0,6).map(s=>(
+                        <TouchableOpacity
+                          key={s.year}
+                          style={[styles.temporadaBtn, temporadaFinal===String(s.year)&&styles.temporadaBtnActiva]}
+                          onPress={()=>setTemporadaManual(String(s.year))}
+                        >
+                          <Text style={[styles.temporadaTexto, temporadaFinal===String(s.year)&&{color:C.accent}]}>
+                            {s.year}{s.current?' ⭐':''}
+                          </Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   </ScrollView>
 
+                  {/* Ingreso manual de temporada */}
+                  <Text style={styles.label}>O escribe el año</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={temporadaManual}
+                    onChangeText={setTemporadaManual}
+                    keyboardType="number-pad"
+                    placeholder="2025"
+                    placeholderTextColor="#555577"
+                    maxLength={4}
+                  />
+
+                  {/* Modo búsqueda */}
                   <View style={styles.modoRow}>
                     <TouchableOpacity style={[styles.modoBtn,modoBusqueda==='dia'&&styles.modoBtnActivo]} onPress={()=>setModoBusqueda('dia')}>
                       <Text style={[styles.modoBtnTexto,modoBusqueda==='dia'&&{color:C.accent}]}>Por día</Text>
@@ -307,12 +358,12 @@ export default function AdminScreen() {
 
                   {modoBusqueda==='dia' ? (
                     <><Text style={styles.label}>Fecha (YYYY-MM-DD)</Text>
-                    <TextInput style={styles.input} value={fechaBusqueda} onChangeText={setFechaBusqueda} placeholder="2026-06-21" placeholderTextColor="#555577"/></>
+                    <TextInput style={styles.input} value={fechaBusqueda} onChangeText={setFechaBusqueda} placeholder="2025-04-05" placeholderTextColor="#555577"/></>
                   ) : (
                     <><Text style={styles.label}>Desde</Text>
-                    <TextInput style={styles.input} value={fechaDesde} onChangeText={setFechaDesde} placeholder="2026-06-21" placeholderTextColor="#555577"/>
+                    <TextInput style={styles.input} value={fechaDesde} onChangeText={setFechaDesde} placeholder="2025-04-01" placeholderTextColor="#555577"/>
                     <Text style={styles.label}>Hasta</Text>
-                    <TextInput style={styles.input} value={fechaHasta} onChangeText={setFechaHasta} placeholder="2026-06-28" placeholderTextColor="#555577"/></>
+                    <TextInput style={styles.input} value={fechaHasta} onChangeText={setFechaHasta} placeholder="2025-04-07" placeholderTextColor="#555577"/></>
                   )}
 
                   <TouchableOpacity style={styles.btnBuscarFixtures} onPress={buscarFixtures} activeOpacity={0.8}>
@@ -330,13 +381,13 @@ export default function AdminScreen() {
                 <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>3</Text></View>
                 <View style={{flex:1}}>
                   <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                    <Text style={styles.pasoTitulo}>Seleccionar partidos</Text>
+                    <Text style={styles.pasoTitulo}>{fixtures.length} partidos encontrados</Text>
                     <TouchableOpacity onPress={()=>{
                       if (seleccionados.size===fixtures.length) setSeleccionados(new Set());
                       else setSeleccionados(new Set(fixtures.map(f=>f.fixture.id)));
                     }}>
                       <Text style={{color:C.accent,fontSize:12,fontWeight:'700'}}>
-                        {seleccionados.size===fixtures.length?'Quitar todos':'Seleccionar todos'}
+                        {seleccionados.size===fixtures.length?'Quitar todos':'Todos'}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -362,7 +413,7 @@ export default function AdminScreen() {
               </View>
             )}
 
-            {/* Paso 4 — Crear */}
+            {/* Paso 4 — Crear quiniela */}
             {seleccionados.size>0 && (
               <View style={styles.pasoCard}>
                 <View style={styles.pasoNumWrap}><Text style={styles.pasoNum}>4</Text></View>
@@ -381,7 +432,7 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* TAB QUINIELAS */}
+        {/* ── TAB QUINIELAS ── */}
         {tab==='quinielas' && (
           quinielas.length===0
             ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas aún.</Text></View>
@@ -400,30 +451,33 @@ export default function AdminScreen() {
               </View>
             ))
         )}
-        <View style={{height:60}}/>
       </ScrollView>
 
-      {/* Modal partido manual */}
+      {/* ── Modal partido manual ── */}
       <Modal visible={modalPartido} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitulo}>Nuevo partido</Text>
-            {([['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']] as const).map(([lbl,val,set,ph]:any)=>(
-              <View key={lbl}><Text style={styles.label}>{lbl}</Text><TextInput style={styles.input} value={val} onChangeText={set} placeholder={ph} placeholderTextColor="#555577"/></View>
-            ))}
-            <Text style={styles.label}>Jornada</Text>
-            <TextInput style={styles.input} value={jornada} onChangeText={setJornada} keyboardType="number-pad"/>
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.btnCancelar} onPress={()=>setModalPartido(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.btnGuardar,saving&&{opacity:0.6}]} onPress={agregarPartido} disabled={saving}>
-                {saving?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar</Text>}
-              </TouchableOpacity>
+        <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitulo}>Nuevo partido</Text>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {([['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']] as const).map(([lbl,val,set,ph]:any)=>(
+                  <View key={lbl}><Text style={styles.label}>{lbl}</Text><TextInput style={styles.input} value={val} onChangeText={set} placeholder={ph} placeholderTextColor="#555577"/></View>
+                ))}
+                <Text style={styles.label}>Jornada</Text>
+                <TextInput style={styles.input} value={jornada} onChangeText={setJornada} keyboardType="number-pad"/>
+                <View style={styles.modalBtns}>
+                  <TouchableOpacity style={styles.btnCancelar} onPress={()=>setModalPartido(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.btnGuardar,saving&&{opacity:0.6}]} onPress={agregarPartido} disabled={saving}>
+                    {saving?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar</Text>}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal resultado */}
+      {/* ── Modal resultado ── */}
       <Modal visible={modalResultado} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -448,12 +502,13 @@ export default function AdminScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg}, center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
+  root:{flex:1,backgroundColor:C.bg},
+  center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
   backBtn:{padding:6,borderRadius:10,backgroundColor:C.card},
   headerTitle:{color:C.text,fontSize:18,fontWeight:'bold'},
@@ -478,15 +533,17 @@ const styles = StyleSheet.create({
   actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
   emptyBox:{margin:16,padding:20,backgroundColor:C.card,borderRadius:12,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
   emptyText:{color:C.textSub,fontSize:14,textAlign:'center'},
+  hint:{color:C.textSub,fontSize:11,marginBottom:10,fontStyle:'italic'},
   pasoCard:{backgroundColor:C.card,borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.cardBorder,flexDirection:'row',gap:12},
   pasoNumWrap:{width:28,height:28,borderRadius:14,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent,justifyContent:'center',alignItems:'center'},
   pasoNum:{color:C.accent,fontWeight:'bold',fontSize:14},
   pasoTitulo:{color:C.text,fontWeight:'bold',fontSize:14,marginBottom:12},
   searchRow:{flexDirection:'row',gap:8},
   btnSearch:{backgroundColor:C.accent,paddingHorizontal:14,paddingVertical:12,borderRadius:10,justifyContent:'center',alignItems:'center'},
-  ligasLista:{maxHeight:220,marginTop:10,borderRadius:10,borderWidth:1,borderColor:C.cardBorder},
+  ligasLista:{marginTop:10,borderRadius:10,borderWidth:1,borderColor:C.cardBorder,maxHeight:250},
   ligaRow:{flexDirection:'row',alignItems:'center',padding:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
   ligaRowActiva:{backgroundColor:C.accentDim},
+  ligaTipo:{fontSize:18},
   ligaNombre:{color:C.text,fontWeight:'600',fontSize:13},
   ligaPais:{color:C.textSub,fontSize:11,marginTop:2},
   temporadaBtn:{paddingHorizontal:14,paddingVertical:7,borderRadius:20,borderWidth:1.5,borderColor:C.cardBorder,backgroundColor:'#12121f'},
