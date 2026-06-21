@@ -20,15 +20,24 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
     setLoading(false);
+    console.log('LOGIN resultado:', JSON.stringify({ user: data?.user?.email, error }));
     if (error) {
-      Alert.alert('Error al entrar', 'Correo o contrasena incorrectos.');
+      if (error.message.includes('Email not confirmed')) {
+        Alert.alert(
+          'Correo no confirmado',
+          'Ve a Supabase > Authentication > Providers > Email y desactiva "Confirm email".'
+        );
+      } else if (error.message.includes('Invalid login credentials')) {
+        Alert.alert('Credenciales incorrectas', 'El correo o la contrasena no coinciden.');
+      } else {
+        Alert.alert('Error', error.message);
+      }
     }
-    // Si es correcto AuthContext redirige automaticamente
   };
 
   const handleRegistro = async () => {
@@ -41,21 +50,26 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: { data: { nombre } },
     });
     setLoading(false);
+    console.log('REGISTRO resultado:', JSON.stringify({ user: data?.user?.email, confirmed: data?.user?.confirmed_at, error }));
     if (error) {
       if (error.message.includes('already registered')) {
-        Alert.alert('Correo en uso', 'Ya existe una cuenta con ese correo. Inicia sesion.');
+        Alert.alert('Correo en uso', 'Ya existe una cuenta. Inicia sesion.');
         setModo('login');
       } else {
         Alert.alert('Error', error.message);
       }
+    } else if (data?.user && !data.user.confirmed_at) {
+      Alert.alert(
+        'Confirma tu correo',
+        'Te enviamos un correo de confirmacion. Si no quieres esto, desactiva "Confirm email" en Supabase.'
+      );
     }
-    // Si es correcto AuthContext redirige automaticamente
   };
 
   return (
@@ -71,7 +85,6 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.card}>
-          {/* Tabs login / registro */}
           <View style={styles.tabs}>
             <TouchableOpacity
               style={[styles.tab, modo === 'login' && styles.tabActivo]}
@@ -142,10 +155,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           {modo === 'login' && (
-            <TouchableOpacity
-              style={styles.btnSecundario}
-              onPress={() => setModo('registro')}
-            >
+            <TouchableOpacity style={styles.btnSecundario} onPress={() => setModo('registro')}>
               <Text style={styles.btnSecundarioTexto}>No tengo cuenta, registrarme</Text>
             </TouchableOpacity>
           )}
