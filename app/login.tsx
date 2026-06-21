@@ -7,70 +7,55 @@ import {
 import { supabase } from '../lib/supabase';
 
 export default function LoginScreen() {
-  const [step, setStep] = useState<'email' | 'token'>('email');
+  const [modo, setModo] = useState<'login' | 'registro'>('login');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [nombre, setNombre] = useState('');
-  const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
+  const [verPassword, setVerPassword] = useState(false);
 
-  const enviarCodigo = async () => {
-    if (!email || !nombre) {
-      Alert.alert('Datos incompletos', 'Ingresa tu nombre y correo.');
-      return;
-    }
-    const emailLimpio = email.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(emailLimpio)) {
-      Alert.alert('Correo invalido', 'Ingresa un correo electronico valido.');
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Campos requeridos', 'Ingresa tu correo y contrasena.');
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: emailLimpio,
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    setLoading(false);
+    if (error) {
+      Alert.alert('Error al entrar', 'Correo o contrasena incorrectos.');
+    }
+    // Si es correcto AuthContext redirige automaticamente
+  };
+
+  const handleRegistro = async () => {
+    if (!nombre || !email || !password) {
+      Alert.alert('Campos requeridos', 'Completa todos los campos.');
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert('Contrasena muy corta', 'Minimo 6 caracteres.');
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
       options: { data: { nombre } },
     });
     setLoading(false);
     if (error) {
-      Alert.alert('Error', error.message);
-    } else {
-      setStep('token');
+      if (error.message.includes('already registered')) {
+        Alert.alert('Correo en uso', 'Ya existe una cuenta con ese correo. Inicia sesion.');
+        setModo('login');
+      } else {
+        Alert.alert('Error', error.message);
+      }
     }
-  };
-
-  const verificarToken = async () => {
-    let tokenLimpio = token.trim();
-    // Extraer token de la URL si se pega el enlace completo
-    const match = tokenLimpio.match(/[?&]token=([a-zA-Z0-9]+)/);
-    if (match) {
-      tokenLimpio = match[1];
-    }
-    if (!tokenLimpio) {
-      Alert.alert('Token vacio', 'Pega el enlace completo.');
-      return;
-    }
-
-    console.log('TOKEN A VERIFICAR:', tokenLimpio);
-    console.log('EMAIL:', email.trim().toLowerCase());
-
-    setLoading(true);
-    const { data, error } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: tokenLimpio,
-      type: 'email',
-    });
-    setLoading(false);
-
-    console.log('RESULTADO:', JSON.stringify({ data, error }));
-
-    if (error) {
-      Alert.alert('Error: ' + error.message, 'Solicita un nuevo enlace.');
-      setToken('');
-    } else if (data?.session) {
-      // Sesion creada, AuthContext deberia redirigir
-      console.log('SESION OK:', data.session.user?.email);
-    } else {
-      Alert.alert('Sin sesion', 'No se pudo crear la sesion. Intenta de nuevo.');
-    }
+    // Si es correcto AuthContext redirige automaticamente
   };
 
   return (
@@ -86,11 +71,24 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.card}>
-          {step === 'email' ? (
-            <>
-              <Text style={styles.cardTitulo}>Inicia sesion</Text>
-              <Text style={styles.cardSub}>Te enviaremos un enlace de acceso a tu correo</Text>
+          {/* Tabs login / registro */}
+          <View style={styles.tabs}>
+            <TouchableOpacity
+              style={[styles.tab, modo === 'login' && styles.tabActivo]}
+              onPress={() => setModo('login')}
+            >
+              <Text style={[styles.tabTexto, modo === 'login' && styles.tabTextoActivo]}>Iniciar sesion</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, modo === 'registro' && styles.tabActivo]}
+              onPress={() => setModo('registro')}
+            >
+              <Text style={[styles.tabTexto, modo === 'registro' && styles.tabTextoActivo]}>Crear cuenta</Text>
+            </TouchableOpacity>
+          </View>
 
+          {modo === 'registro' && (
+            <>
               <Text style={styles.label}>Nombre completo</Text>
               <TextInput
                 style={styles.input}
@@ -100,71 +98,56 @@ export default function LoginScreen() {
                 placeholderTextColor="#bbb"
                 autoCapitalize="words"
               />
-
-              <Text style={styles.label}>Correo electronico</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="tucorreo@gmail.com"
-                placeholderTextColor="#bbb"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              <TouchableOpacity
-                style={[styles.btn, loading && styles.btnDisabled]}
-                onPress={enviarCodigo}
-                disabled={loading}
-              >
-                {loading
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.btnTexto}>Enviar enlace</Text>
-                }
-              </TouchableOpacity>
             </>
-          ) : (
-            <>
-              <Text style={styles.enviadoEmoji}>📧</Text>
-              <Text style={styles.cardTitulo}>Revisa tu correo</Text>
-              <Text style={styles.cardSub}>
-                Manten presionado "Sign in" en el correo, copia el enlace y pegalo aqui.
-              </Text>
+          )}
 
-              <Text style={styles.label}>Pega el enlace aqui</Text>
-              <TextInput
-                style={[styles.input, styles.tokenInput]}
-                value={token}
-                onChangeText={setToken}
-                placeholder="https://kdvbmvs...supabase.co/auth/..."
-                placeholderTextColor="#bbb"
-                autoCapitalize="none"
-                autoCorrect={false}
-                multiline
-                numberOfLines={3}
-                autoFocus
-              />
+          <Text style={styles.label}>Correo electronico</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="tucorreo@gmail.com"
+            placeholderTextColor="#bbb"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
 
-              <TouchableOpacity
-                style={[styles.btn, loading && styles.btnDisabled]}
-                onPress={verificarToken}
-                disabled={loading}
-              >
-                {loading
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.btnTexto}>Entrar</Text>
-                }
-              </TouchableOpacity>
+          <Text style={styles.label}>Contrasena</Text>
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={styles.passwordInput}
+              value={password}
+              onChangeText={setPassword}
+              placeholder={modo === 'registro' ? 'Minimo 6 caracteres' : 'Tu contrasena'}
+              placeholderTextColor="#bbb"
+              secureTextEntry={!verPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TouchableOpacity onPress={() => setVerPassword(!verPassword)} style={styles.eyeBtn}>
+              <Text style={styles.eyeIcon}>{verPassword ? '🙈' : '👁️'}</Text>
+            </TouchableOpacity>
+          </View>
 
-              <TouchableOpacity style={styles.btnSecundario} onPress={enviarCodigo} disabled={loading}>
-                <Text style={styles.btnSecundarioTexto}>Reenviar enlace</Text>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btn, loading && styles.btnDisabled]}
+            onPress={modo === 'login' ? handleLogin : handleRegistro}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.btnTexto}>{modo === 'login' ? 'Entrar' : 'Crear cuenta'}</Text>
+            }
+          </TouchableOpacity>
 
-              <TouchableOpacity style={styles.btnSecundario} onPress={() => { setStep('email'); setToken(''); }}>
-                <Text style={styles.btnSecundarioTexto}>Usar otro correo</Text>
-              </TouchableOpacity>
-            </>
+          {modo === 'login' && (
+            <TouchableOpacity
+              style={styles.btnSecundario}
+              onPress={() => setModo('registro')}
+            >
+              <Text style={styles.btnSecundarioTexto}>No tengo cuenta, registrarme</Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>
@@ -178,16 +161,21 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 64 },
   titulo: { fontSize: 34, fontWeight: 'bold', color: '#fff', marginTop: 8 },
   subtitulo: { fontSize: 15, color: '#009ee3', marginTop: 4 },
-  card: { backgroundColor: '#fff', padding: 28, borderRadius: 16, width: '100%', maxWidth: 420, elevation: 8 },
-  cardTitulo: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', textAlign: 'center' },
-  cardSub: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16, marginTop: 6, lineHeight: 20 },
+  card: { backgroundColor: '#fff', padding: 24, borderRadius: 16, width: '100%', maxWidth: 420, elevation: 8 },
+  tabs: { flexDirection: 'row', marginBottom: 24, borderRadius: 10, overflow: 'hidden', borderWidth: 1.5, borderColor: '#009ee3' },
+  tab: { flex: 1, padding: 12, alignItems: 'center', backgroundColor: '#fff' },
+  tabActivo: { backgroundColor: '#009ee3' },
+  tabTexto: { fontWeight: '600', color: '#009ee3', fontSize: 14 },
+  tabTextoActivo: { color: '#fff' },
   label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 5 },
   input: { borderWidth: 1.5, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 15, color: '#333', backgroundColor: '#fafafa' },
-  tokenInput: { fontSize: 12, minHeight: 80, textAlignVertical: 'top' },
-  btn: { backgroundColor: '#009ee3', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 4 },
+  passwordContainer: { flexDirection: 'row', borderWidth: 1.5, borderColor: '#ddd', borderRadius: 8, marginBottom: 20, backgroundColor: '#fafafa', alignItems: 'center' },
+  passwordInput: { flex: 1, padding: 12, fontSize: 15, color: '#333' },
+  eyeBtn: { padding: 12 },
+  eyeIcon: { fontSize: 18 },
+  btn: { backgroundColor: '#009ee3', padding: 16, borderRadius: 10, alignItems: 'center' },
   btnDisabled: { backgroundColor: '#90caf9' },
   btnTexto: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  btnSecundario: { alignItems: 'center', marginTop: 14 },
+  btnSecundario: { alignItems: 'center', marginTop: 16 },
   btnSecundarioTexto: { color: '#009ee3', fontSize: 14 },
-  enviadoEmoji: { fontSize: 48, textAlign: 'center', marginBottom: 10 },
 });
