@@ -15,7 +15,7 @@ const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8'
 type Partido  = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean; resultado_final:string|null; api_fixture_id:number|null };
 type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string };
 type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuarios:{nombre:string;username:string}|null };
-type Fixture  = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}} };
+type Fixture  = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}}; goals?:{home:number|null;away:number|null} };
 type TabAdmin = 'jornadas'|'importar'|'quinielas';
 
 const LIGAS_POPULARES = [
@@ -38,7 +38,8 @@ export default function AdminScreen() {
   const [partidos, setPartidos]   = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [syncing, setSyncing]     = useState(false);
+  // FIX: estado individual por jornada en vez de un boolean global
+  const [syncingByJornada, setSyncingByJornada] = useState<Record<string, boolean>>({});
   const [borrando, setBorrando]   = useState<string|null>(null);
 
   const [modalNueva, setModalNueva] = useState(false);
@@ -130,40 +131,29 @@ export default function AdminScreen() {
           onPress: async () => {
             setBorrando(j.id);
             try {
-              // 1. Obtener IDs de partidos directamente desde la DB (no del estado local)
               const { data: psDB, error: psErr } = await supabase
                 .from('partidos').select('id').eq('jornada_id', j.id);
               if (psErr) throw new Error('Error leyendo partidos: ' + psErr.message);
-
               const psIds = (psDB || []).map((p: any) => p.id);
-
-              // 2. Borrar predicciones de esos partidos
               if (psIds.length > 0) {
                 const { error: predErr } = await supabase
                   .from('predicciones').delete().in('partido_id', psIds);
                 if (predErr) throw new Error('Error borrando predicciones: ' + predErr.message);
               }
-
-              // 3. Borrar quinielas de esta jornada
               const { error: qErr } = await supabase
                 .from('quinielas').delete().eq('jornada_id', j.id);
               if (qErr) throw new Error('Error borrando quinielas: ' + qErr.message);
-
-              // 4. Borrar partidos de esta jornada
               const { error: pErr } = await supabase
                 .from('partidos').delete().eq('jornada_id', j.id);
               if (pErr) throw new Error('Error borrando partidos: ' + pErr.message);
-
-              // 5. Borrar la jornada
               const { error: jErr } = await supabase
                 .from('jornadas').delete().eq('id', j.id);
               if (jErr) throw new Error('Error borrando jornada: ' + jErr.message);
-
               await cargarDatos();
               Alert.alert('🗑️ Jornada eliminada', `"${j.nombre}" fue eliminada correctamente.`);
             } catch (e: any) {
               Alert.alert('❌ Error al borrar', e.message);
-              await cargarDatos(); // recargar igual para mantener UI sincronizada
+              await cargarDatos();
             } finally {
               setBorrando(null);
             }
@@ -178,32 +168,44 @@ export default function AdminScreen() {
       Alert.alert('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.');
       return;
     }
-    setSyncing(true);
+    // FIX: solo activa el spinner de esta jornada
+    setSyncingByJornada(prev => ({ ...prev, [j.id]: true }));
     try {
       const round = `Regular Season - ${j.api_matchday}`;
       const data  = await apifb.fixturesPorRound(j.api_competition_id, j.api_season, round);
       const matches: Fixture[] = data.response || [];
-      if (!matches.length) { Alert.alert('Sin datos', 'La API no devolvió partidos.'); setSyncing(false); return; }
-
+      if (!matches.length) {
+        Alert.alert('Sin datos', 'La API no devolvió partidos.');
+        return;
+      }
       const ps = partidos.filter(p => p.jornada_id === j.id && p.api_fixture_id);
       let actualizados = 0;
       for (const p of ps) {
         const match = matches.find(m => m.fixture.id === p.api_fixture_id);
         if (!match) continue;
-        const { goals } = match as any;
+        const goals = match.goals;
         if (goals?.home == null || goals?.away == null) continue;
         if (match.fixture.status.short !== 'FT') continue;
-        const home = goals.home as number;
-        const away = goals.away as number;
+        const home = goals.home;
+        const away = goals.away;
         const res  = home > away ? '1' : away > home ? '2' : 'X';
-        await supabase.from('partidos').update({ resultado_final: res, cerrado: true }).eq('id', p.id);
+        // FIX: filtra por jornada_id para que solo actualice la jornada correcta
+        await supabase
+          .from('partidos')
+          .update({ resultado_final: res, cerrado: true })
+          .eq('id', p.id)
+          .eq('jornada_id', j.id);
         actualizados++;
       }
       if (actualizados > 0) await recalcularAciertos(j.id);
-      cargarDatos();
-      Alert.alert('✅ Sincronizado', `${actualizados} resultado(s) actualizados.`);
-    } catch (e) { Alert.alert('Error', String(e)); }
-    setSyncing(false);
+      await cargarDatos();
+      Alert.alert('✅ Sincronizado', `${actualizados} resultado(s) actualizados en "${j.nombre}".`);
+    } catch (e) {
+      Alert.alert('Error', String(e));
+    } finally {
+      // FIX: solo desactiva el spinner de esta jornada
+      setSyncingByJornada(prev => ({ ...prev, [j.id]: false }));
+    }
   };
 
   const recalcularAciertos = async (jornada_id: string) => {
@@ -315,7 +317,6 @@ export default function AdminScreen() {
 
       <ScrollView style={{flex:1}} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingBottom:insets.bottom+40}}>
 
-        {/* ====== JORNADAS ====== */}
         {tab==='jornadas' && (
           <View style={{padding:16}}>
             <TouchableOpacity style={styles.btnNueva} onPress={()=>setModalNueva(true)} activeOpacity={0.8}>
@@ -333,6 +334,8 @@ export default function AdminScreen() {
               const isOpen = j.estado === 'abierta';
               const isCerrada = j.estado === 'cerrada';
               const esBorrando = borrando === j.id;
+              // FIX: spinner individual por jornada
+              const syncing = !!syncingByJornada[j.id];
               return (
                 <View key={j.id} style={styles.jornadaCard}>
                   <View style={styles.jornadaHeader}>
@@ -344,12 +347,7 @@ export default function AdminScreen() {
                       <View style={[styles.estadoBadge,{borderColor:estadoColor(j.estado)}]}>
                         <Text style={[styles.estadoTexto,{color:estadoColor(j.estado)}]}>{j.estado.toUpperCase()}</Text>
                       </View>
-                      {/* Botón borrar con spinner si está borrando */}
-                      <TouchableOpacity
-                        onPress={() => borrarJornada(j)}
-                        style={styles.btnTrash}
-                        disabled={esBorrando}
-                      >
+                      <TouchableOpacity onPress={() => borrarJornada(j)} style={styles.btnTrash} disabled={esBorrando}>
                         {esBorrando
                           ? <ActivityIndicator size="small" color={C.red}/>
                           : <Ionicons name="trash-outline" size={16} color={C.red}/>
@@ -381,8 +379,15 @@ export default function AdminScreen() {
                       </TouchableOpacity>
                     )}
                     {(isOpen || isCerrada) && j.api_competition_id && (
-                      <TouchableOpacity style={[styles.accionBtn,{backgroundColor:C.accent}]} onPress={()=>sincronizarResultados(j)} disabled={syncing}>
-                        {syncing ? <ActivityIndicator color="#fff" size="small"/> : <><Ionicons name="sync" size={13} color="#fff"/><Text style={styles.accionTexto}>Sincronizar API</Text></>}
+                      <TouchableOpacity
+                        style={[styles.accionBtn,{backgroundColor:C.accent},syncing&&{opacity:0.6}]}
+                        onPress={()=>sincronizarResultados(j)}
+                        disabled={syncing}
+                      >
+                        {syncing
+                          ? <ActivityIndicator color="#fff" size="small"/>
+                          : <><Ionicons name="sync" size={13} color="#fff"/><Text style={styles.accionTexto}>Sincronizar API</Text></>
+                        }
                       </TouchableOpacity>
                     )}
                     {isCerrada && (
@@ -398,7 +403,6 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* ====== IMPORTAR ====== */}
         {tab==='importar' && (
           <View style={{padding:16}}>
             <View style={styles.seccionCard}>
@@ -485,7 +489,6 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* ====== QUINIELAS ====== */}
         {tab==='quinielas' && (
           <View style={{padding:16}}>
             {quinielas.length===0
@@ -522,7 +525,6 @@ export default function AdminScreen() {
         )}
       </ScrollView>
 
-      {/* Modal nueva jornada */}
       <Modal visible={modalNueva} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
           <View style={styles.modalOverlay}>
@@ -541,7 +543,6 @@ export default function AdminScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal resultado manual */}
       <Modal visible={modalResultado} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
