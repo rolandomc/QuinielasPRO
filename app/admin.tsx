@@ -38,7 +38,6 @@ export default function AdminScreen() {
   const [resultadoInput, setResultadoInput] = useState<'1' | 'X' | '2' | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Form nuevo partido
   const [local, setLocal] = useState('');
   const [visitante, setVisitante] = useState('');
   const [fecha, setFecha] = useState('');
@@ -93,54 +92,68 @@ export default function AdminScreen() {
     if (!resultadoInput || !partidoSeleccionado) return;
     setSaving(true);
 
-    // 1. Guardar resultado en el partido
-    await supabase.from('partidos')
+    // 1. Guardar resultado en el partido y cerrarlo
+    const { error } = await supabase
+      .from('partidos')
       .update({ resultado_final: resultadoInput, cerrado: true })
       .eq('id', partidoSeleccionado.id);
 
-    // 2. Recalcular aciertos para todos en esa jornada
+    if (error) {
+      Alert.alert('Error', error.message);
+      setSaving(false);
+      return;
+    }
+
+    // 2. Recalcular aciertos para TODOS los usuarios de esa jornada
     await recalcularAciertos(partidoSeleccionado.jornada);
 
     setSaving(false);
     setModalResultado(false);
     cargarDatos();
+    Alert.alert('✅ Listo', 'Resultado guardado y aciertos recalculados.');
   };
 
-  const recalcularAciertos = async (jornada: number) => {
-    // Obtener todos los partidos con resultado de la jornada
-    const { data: partidosJornada } = await supabase
+  const recalcularAciertos = async (jornadaNum: number) => {
+    // 1. Todos los partidos de la jornada (con o sin resultado)
+    const { data: todosPartidos } = await supabase
       .from('partidos')
       .select('id, resultado_final')
-      .eq('jornada', jornada)
-      .not('resultado_final', 'is', null);
+      .eq('jornada', jornadaNum);
 
-    if (!partidosJornada || partidosJornada.length === 0) return;
+    if (!todosPartidos || todosPartidos.length === 0) return;
 
-    // Obtener todas las quinielas de la jornada
+    // Solo los que ya tienen resultado para comparar
+    const conResultado = todosPartidos.filter(p => p.resultado_final !== null);
+    const idsConResultado = conResultado.map(p => p.id);
+
+    if (idsConResultado.length === 0) return;
+
+    // 2. Todas las quinielas de esa jornada
     const { data: quinielasJornada } = await supabase
       .from('quinielas')
       .select('id, usuario_id')
-      .eq('jornada', jornada);
+      .eq('jornada', jornadaNum);
 
-    if (!quinielasJornada) return;
+    if (!quinielasJornada || quinielasJornada.length === 0) return;
 
+    // 3. Para cada quiniela calcular aciertos
     for (const quiniela of quinielasJornada) {
-      // Obtener predicciones del usuario para esta jornada
       const { data: preds } = await supabase
         .from('predicciones')
         .select('partido_id, resultado')
         .eq('usuario_id', quiniela.usuario_id)
-        .in('partido_id', partidosJornada.map(p => p.id));
+        .in('partido_id', idsConResultado);
 
-      // Contar aciertos
       let aciertos = 0;
       for (const pred of (preds || [])) {
-        const partido = partidosJornada.find(p => p.id === pred.partido_id);
-        if (partido?.resultado_final === pred.resultado) aciertos++;
+        const partido = conResultado.find(p => p.id === pred.partido_id);
+        if (partido && partido.resultado_final === pred.resultado) {
+          aciertos++;
+        }
       }
 
-      // Actualizar aciertos en quinielas
-      await supabase.from('quinielas')
+      await supabase
+        .from('quinielas')
         .update({ aciertos })
         .eq('id', quiniela.id);
     }

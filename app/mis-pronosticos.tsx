@@ -28,35 +28,42 @@ export default function MisPronosticosScreen() {
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    cargar();
+    if (user && jornada) cargar();
   }, [jornada, user]);
 
   const cargar = async () => {
-    if (!user || !jornada) return;
     setLoading(true);
 
-    // Partidos de la jornada
+    // 1. Todos los partidos de la jornada (cerrados o no)
     const { data: partidos } = await supabase
       .from('partidos')
       .select('id, local, visitante, fecha, resultado_final')
-      .eq('jornada', parseInt(jornada))
+      .eq('jornada', parseInt(jornada as string))
       .order('fecha');
 
-    // Mis predicciones
+    if (!partidos || partidos.length === 0) {
+      setFilas([]);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Mis predicciones para TODOS los partidos de la jornada
     const { data: preds } = await supabase
       .from('predicciones')
       .select('partido_id, resultado')
-      .eq('usuario_id', user.id)
-      .in('partido_id', (partidos || []).map(p => p.id));
+      .eq('usuario_id', user!.id)
+      .in('partido_id', partidos.map(p => p.id));
 
     const predMap: Record<string, string> = {};
     (preds || []).forEach(p => { predMap[p.partido_id] = p.resultado; });
 
-    const filas: FilaPartido[] = (partidos || []).map(p => {
-      const miPred = predMap[p.id] || null;
-      const acerto = p.resultado_final && miPred
-        ? p.resultado_final === miPred
-        : null;
+    // 3. Construir filas comparando prediccion vs resultado real
+    const filasCalc: FilaPartido[] = partidos.map(p => {
+      const miPred = predMap[p.id] ?? null;
+      let acerto: boolean | null = null;
+      if (p.resultado_final !== null && miPred !== null) {
+        acerto = p.resultado_final === miPred;
+      }
       return {
         id: p.id,
         local: p.local,
@@ -68,18 +75,19 @@ export default function MisPronosticosScreen() {
       };
     });
 
-    const conResultado = filas.filter(f => f.acerto !== null);
-    setAciertos(conResultado.filter(f => f.acerto).length);
-    setTotal(conResultado.length);
-    setFilas(filas);
+    // 4. Calcular resumen solo de partidos ya jugados
+    const jugados = filasCalc.filter(f => f.acerto !== null);
+    setAciertos(jugados.filter(f => f.acerto === true).length);
+    setTotal(jugados.length);
+    setFilas(filasCalc);
     setLoading(false);
   };
 
   const etiqueta = (val: string | null, local: string, visitante: string) => {
     if (!val) return '—';
-    if (val === '1') return `1 - ${local}`;
-    if (val === 'X') return 'X - Empate';
-    if (val === '2') return `2 - ${visitante}`;
+    if (val === '1') return `1 · ${local}`;
+    if (val === 'X') return 'X · Empate';
+    if (val === '2') return `2 · ${visitante}`;
     return val;
   };
 
@@ -87,7 +95,6 @@ export default function MisPronosticosScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -100,7 +107,7 @@ export default function MisPronosticosScreen() {
         <ActivityIndicator color="#009ee3" style={{ marginTop: 40 }} />
       ) : (
         <ScrollView>
-          {/* Resumen */}
+          {/* Resumen solo si hay partidos jugados */}
           {total > 0 && (
             <View style={styles.resumen}>
               <View style={styles.resumenItem}>
@@ -122,62 +129,59 @@ export default function MisPronosticosScreen() {
             </View>
           )}
 
-          {/* Lista de partidos */}
-          {filas.map(f => (
-            <View key={f.id} style={[
-              styles.card,
-              f.acerto === true && styles.cardAcierto,
-              f.acerto === false && styles.cardFallo,
-            ]}>
-              {/* Icono resultado */}
-              <View style={styles.iconoContainer}>
-                {f.acerto === true && <Ionicons name="checkmark-circle" size={26} color="#4caf50" />}
-                {f.acerto === false && <Ionicons name="close-circle" size={26} color="#e53935" />}
-                {f.acerto === null && <Ionicons name="time-outline" size={26} color="#ff9800" />}
-              </View>
+          {filas.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyText}>No se encontraron partidos para esta jornada.</Text>
+            </View>
+          ) : (
+            filas.map(f => (
+              <View key={f.id} style={[
+                styles.card,
+                f.acerto === true && styles.cardAcierto,
+                f.acerto === false && styles.cardFallo,
+              ]}>
+                <View style={styles.iconoContainer}>
+                  {f.acerto === true  && <Ionicons name="checkmark-circle" size={26} color="#4caf50" />}
+                  {f.acerto === false && <Ionicons name="close-circle"     size={26} color="#e53935" />}
+                  {f.acerto === null  && <Ionicons name="time-outline"     size={26} color="#ff9800" />}
+                </View>
 
-              <View style={styles.cardBody}>
-                <Text style={styles.cardFecha}>
-                  {new Date(f.fecha).toLocaleDateString('es-MX', {
-                    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                  })}
-                </Text>
-                <Text style={styles.cardPartido}>{f.local} vs {f.visitante}</Text>
+                <View style={styles.cardBody}>
+                  <Text style={styles.cardFecha}>
+                    {new Date(f.fecha).toLocaleDateString('es-MX', {
+                      weekday: 'short', day: 'numeric', month: 'short',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </Text>
+                  <Text style={styles.cardPartido}>{f.local} vs {f.visitante}</Text>
 
-                <View style={styles.comparacion}>
-                  {/* Mi pronóstico */}
-                  <View style={styles.comparacionItem}>
-                    <Text style={styles.comparacionLabel}>Mi pronóstico</Text>
-                    <View style={[
-                      styles.badge,
-                      f.mi_prediccion ? styles.badgePred : styles.badgeVacio,
-                    ]}>
-                      <Text style={styles.badgeTexto}>
-                        {etiqueta(f.mi_prediccion, f.local, f.visitante)}
-                      </Text>
+                  <View style={styles.comparacion}>
+                    <View style={styles.comparacionItem}>
+                      <Text style={styles.comparacionLabel}>Mi pronóstico</Text>
+                      <View style={[styles.badge, f.mi_prediccion ? styles.badgePred : styles.badgeVacio]}>
+                        <Text style={[styles.badgeTexto, !f.mi_prediccion && { color: '#888' }]}>
+                          {etiqueta(f.mi_prediccion, f.local, f.visitante)}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
 
-                  <Ionicons name="arrow-forward" size={16} color="#bbb" style={{ marginTop: 18 }} />
+                    <Ionicons name="arrow-forward" size={16} color="#bbb" style={{ marginTop: 18 }} />
 
-                  {/* Resultado real */}
-                  <View style={styles.comparacionItem}>
-                    <Text style={styles.comparacionLabel}>Resultado</Text>
-                    <View style={[
-                      styles.badge,
-                      f.resultado_final ? styles.badgeReal : styles.badgePendiente,
-                    ]}>
-                      <Text style={styles.badgeTexto}>
-                        {f.resultado_final
-                          ? etiqueta(f.resultado_final, f.local, f.visitante)
-                          : 'Pendiente'}
-                      </Text>
+                    <View style={styles.comparacionItem}>
+                      <Text style={styles.comparacionLabel}>Resultado real</Text>
+                      <View style={[styles.badge, f.resultado_final ? styles.badgeReal : styles.badgePendiente]}>
+                        <Text style={[styles.badgeTexto, !f.resultado_final && { color: '#e65100' }]}>
+                          {f.resultado_final
+                            ? etiqueta(f.resultado_final, f.local, f.visitante)
+                            : 'Pendiente'}
+                        </Text>
+                      </View>
                     </View>
                   </View>
                 </View>
               </View>
-            </View>
-          ))}
+            ))
+          )}
           <View style={{ height: 30 }} />
         </ScrollView>
       )}
@@ -195,9 +199,11 @@ const styles = StyleSheet.create({
   resumenNum: { color: '#009ee3', fontSize: 28, fontWeight: 'bold' },
   resumenLabel: { color: '#aaa', fontSize: 11, marginTop: 2 },
   resumenDivider: { width: 1, height: 40, backgroundColor: '#333' },
+  emptyBox: { margin: 20, padding: 20, backgroundColor: '#fff', borderRadius: 12, alignItems: 'center' },
+  emptyText: { color: '#888', fontSize: 14 },
   card: { backgroundColor: '#fff', margin: 10, marginBottom: 6, borderRadius: 12, padding: 14, elevation: 2, flexDirection: 'row', alignItems: 'flex-start', borderLeftWidth: 4, borderLeftColor: '#ddd' },
   cardAcierto: { borderLeftColor: '#4caf50', backgroundColor: '#f9fff9' },
-  cardFallo: { borderLeftColor: '#e53935', backgroundColor: '#fff9f9' },
+  cardFallo:   { borderLeftColor: '#e53935', backgroundColor: '#fff9f9' },
   iconoContainer: { marginRight: 12, marginTop: 4 },
   cardBody: { flex: 1 },
   cardFecha: { fontSize: 11, color: '#aaa', marginBottom: 3, textTransform: 'capitalize' },
@@ -206,9 +212,9 @@ const styles = StyleSheet.create({
   comparacionItem: { flex: 1, alignItems: 'center' },
   comparacionLabel: { fontSize: 10, color: '#999', marginBottom: 5, fontWeight: '600', textTransform: 'uppercase' },
   badge: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, minWidth: 80, alignItems: 'center' },
-  badgePred: { backgroundColor: '#1a1a2e' },
-  badgeReal: { backgroundColor: '#009ee3' },
-  badgeVacio: { backgroundColor: '#eee' },
+  badgePred:      { backgroundColor: '#1a1a2e' },
+  badgeReal:      { backgroundColor: '#009ee3' },
+  badgeVacio:     { backgroundColor: '#eee' },
   badgePendiente: { backgroundColor: '#fff3e0', borderWidth: 1, borderColor: '#ff9800' },
   badgeTexto: { color: '#fff', fontSize: 11, fontWeight: '600', textAlign: 'center' },
 });
