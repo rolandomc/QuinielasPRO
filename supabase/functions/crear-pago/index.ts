@@ -53,7 +53,8 @@ serve(async (req) => {
     console.log('MP preference creada:', JSON.stringify({ id: mpData.id }))
     if (!mpData.id) throw new Error('MP Error: ' + JSON.stringify(mpData))
 
-    const urlPago = mpData.sandbox_init_point || mpData.init_point
+    // Producción: siempre usar init_point (no sandbox_init_point)
+    const urlPago = mpData.init_point
 
     return new Response(JSON.stringify({ urlPago }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
