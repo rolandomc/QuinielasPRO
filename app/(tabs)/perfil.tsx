@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity,
+  ScrollView, ActivityIndicator, RefreshControl,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
@@ -14,26 +17,35 @@ type Quiniela = {
 };
 
 export default function PerfilScreen() {
-  const { user, usuario, signOut } = useAuth();
+  const { user, usuario, signOut, refreshUsuario } = useAuth();
   const router = useRouter();
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (user) fetchQuinielas();
-  }, [user]);
-
-  const fetchQuinielas = async () => {
-    setLoading(true);
+  const fetchQuinielas = useCallback(async () => {
+    if (!user) return;
     const { data, error } = await supabase
       .from('quinielas')
       .select('id, jornada, estado_pago, aciertos, creado_en')
-      .eq('usuario_id', user!.id)
+      .eq('usuario_id', user.id)
       .order('creado_en', { ascending: false });
     if (error) console.error('Error quinielas perfil:', error.message);
     if (data) setQuinielas(data);
-    setLoading(false);
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      setLoading(true);
+      fetchQuinielas().finally(() => setLoading(false));
+    }
+  }, [user, fetchQuinielas]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([fetchQuinielas(), refreshUsuario()]);
+    setRefreshing(false);
+  }, [fetchQuinielas, refreshUsuario]);
 
   const cerrarSesion = async () => {
     await signOut();
@@ -42,25 +54,31 @@ export default function PerfilScreen() {
 
   const estadoBadge = (estado: string) => {
     switch (estado) {
-      case 'pagado':    return { label: '✅ Pagado — Participando', bg: '#1b5e20' };
-      case 'pendiente': return { label: '⏳ Pago pendiente',        bg: '#e65100' };
-      default:          return { label: '❌ Sin pago',               bg: '#b71c1c' };
+      case 'pagado':    return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
+      case 'pendiente': return { label: '\u23f3 Pago pendiente',             bg: '#e65100' };
+      default:          return { label: '\u274c Sin pago',                    bg: '#b71c1c' };
     }
   };
 
   const totalAciertos = quinielas.reduce((acc, q) => acc + (q.aciertos || 0), 0);
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#009ee3']} tintColor="#009ee3" />
+      }
+    >
       <View style={styles.avatarSection}>
         <View style={styles.avatar}>
           <Ionicons name="person" size={50} color="#fff" />
         </View>
-        {/* Mostrar username si existe, si no nombre */}
         <Text style={styles.username}>
           {usuario?.username ? `@${usuario.username}` : usuario?.nombre || 'Jugador'}
         </Text>
-        <Text style={styles.nombre}>{usuario?.nombre}</Text>
+        {usuario?.nombre && usuario?.username && (
+          <Text style={styles.nombre}>{usuario.nombre}</Text>
+        )}
         <Text style={styles.email}>{user?.email}</Text>
         {usuario?.es_admin && (
           <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
@@ -131,7 +149,7 @@ const styles = StyleSheet.create({
   avatarSection: { backgroundColor: '#1a1a2e', alignItems: 'center', padding: 30 },
   avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#009ee3', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   username: { color: '#009ee3', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
-  nombre: { color: '#fff', fontSize: 15, opacity: 0.8 },
+  nombre: { color: '#fff', fontSize: 14, opacity: 0.75, marginBottom: 2 },
   email: { color: '#aaa', fontSize: 12, marginTop: 2 },
   btnAdmin: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#009ee3', marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   btnAdminTexto: { color: '#fff', fontWeight: '600', fontSize: 13 },

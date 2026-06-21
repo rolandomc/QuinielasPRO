@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 type Usuario = {
   id: string;
   nombre: string | null;
+  username: string | null;
   telefono: string | null;
   es_admin: boolean;
 };
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUsuario = async (userId: string) => {
     const { data } = await supabase
       .from('usuarios')
-      .select('*')
+      .select('id, nombre, username, telefono, es_admin')
       .eq('id', userId)
       .single();
     if (data) setUsuario(data);
