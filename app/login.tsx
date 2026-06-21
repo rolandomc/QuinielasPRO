@@ -4,13 +4,19 @@ import {
   StyleSheet, Alert, KeyboardAvoidingView,
   Platform, ScrollView, ActivityIndicator, Switch,
 } from 'react-native';
-import * as LocalAuthentication from 'expo-local-authentication';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage from '../lib/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
 const EMAIL_KEY = 'saved_email';
 const BIOMETRIC_KEY = 'biometric_enabled';
+
+// expo-local-authentication solo existe en iOS/Android
+const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
+let LocalAuthentication: any = null;
+if (isNative) {
+  LocalAuthentication = require('expo-local-authentication');
+}
 
 export default function LoginScreen() {
   const [modo, setModo] = useState<'login' | 'registro'>('login');
@@ -29,8 +35,9 @@ export default function LoginScreen() {
   useEffect(() => { inicializar(); }, []);
 
   const inicializar = async () => {
-    const emailGuardado = await AsyncStorage.getItem(EMAIL_KEY);
+    const emailGuardado = await storage.getItem(EMAIL_KEY);
     if (emailGuardado) { setEmail(emailGuardado); setRecordarCorreo(true); }
+    if (!isNative || !LocalAuthentication) return;
     const compatible = await LocalAuthentication.hasHardwareAsync();
     const enrollado = await LocalAuthentication.isEnrolledAsync();
     setBiometricDisponible(compatible && enrollado);
@@ -38,12 +45,13 @@ export default function LoginScreen() {
       const tipos = await LocalAuthentication.supportedAuthenticationTypesAsync();
       if (tipos.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) setBiometricTipo('FaceID');
       else if (tipos.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) setBiometricTipo('Huella');
-      const habilitado = await AsyncStorage.getItem(BIOMETRIC_KEY);
+      const habilitado = await storage.getItem(BIOMETRIC_KEY);
       if (habilitado === 'true') { setBiometricHabilitado(true); autenticarBiometrico(); }
     }
   };
 
   const autenticarBiometrico = async () => {
+    if (!isNative || !LocalAuthentication) return;
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: `Ingresa con ${biometricTipo}`,
       fallbackLabel: 'Usar contraseña',
@@ -51,8 +59,8 @@ export default function LoginScreen() {
       disableDeviceFallback: false,
     });
     if (result.success) {
-      const emailGuardado = await AsyncStorage.getItem(EMAIL_KEY);
-      const passGuardado = await AsyncStorage.getItem('saved_password');
+      const emailGuardado = await storage.getItem(EMAIL_KEY);
+      const passGuardado = await storage.getItem('saved_password');
       if (emailGuardado && passGuardado) {
         setLoading(true);
         const { error } = await supabase.auth.signInWithPassword({ email: emailGuardado, password: passGuardado });
@@ -65,18 +73,19 @@ export default function LoginScreen() {
   };
 
   const toggleBiometrico = async (valor: boolean) => {
+    if (!isNative || !LocalAuthentication) return;
     if (valor) {
       if (!email || !password) { Alert.alert('Ingresa primero', 'Escribe tu correo y contraseña antes de habilitar la biometría.'); return; }
       const result = await LocalAuthentication.authenticateAsync({ promptMessage: `Confirma tu identidad para habilitar ${biometricTipo}` });
       if (result.success) {
-        await AsyncStorage.setItem(BIOMETRIC_KEY, 'true');
-        await AsyncStorage.setItem('saved_password', password);
+        await storage.setItem(BIOMETRIC_KEY, 'true');
+        await storage.setItem('saved_password', password);
         setBiometricHabilitado(true);
         Alert.alert('✅ Listo', `${biometricTipo} habilitado.`);
       }
     } else {
-      await AsyncStorage.setItem(BIOMETRIC_KEY, 'false');
-      await AsyncStorage.removeItem('saved_password');
+      await storage.setItem(BIOMETRIC_KEY, 'false');
+      await storage.removeItem('saved_password');
       setBiometricHabilitado(false);
     }
   };
@@ -90,8 +99,8 @@ export default function LoginScreen() {
       if (error.message.includes('Invalid login credentials')) Alert.alert('Credenciales incorrectas', 'El correo o la contraseña no coinciden.');
       else Alert.alert('Error', error.message);
     } else {
-      if (recordarCorreo) await AsyncStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
-      else await AsyncStorage.removeItem(EMAIL_KEY);
+      if (recordarCorreo) await storage.setItem(EMAIL_KEY, email.trim().toLowerCase());
+      else await storage.removeItem(EMAIL_KEY);
     }
   };
 
@@ -102,7 +111,6 @@ export default function LoginScreen() {
     if (password.length < 6) { Alert.alert('Contraseña muy corta', 'Mínimo 6 caracteres.'); return; }
     setLoading(true);
 
-    // Verificar que username no exista
     const { data: existeUsername } = await supabase
       .from('usuarios')
       .select('id')
@@ -124,7 +132,7 @@ export default function LoginScreen() {
       if (error.message.includes('already registered')) { Alert.alert('Correo en uso', 'Ya existe una cuenta. Inicia sesión.'); setModo('login'); }
       else Alert.alert('Error', error.message);
     } else {
-      if (recordarCorreo) await AsyncStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
+      if (recordarCorreo) await storage.setItem(EMAIL_KEY, email.trim().toLowerCase());
     }
   };
 

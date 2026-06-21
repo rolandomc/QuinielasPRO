@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Usa Face ID para acceder a tu cuenta de Quiniela Pro de forma segura y rápida."
+        "NSFaceIDUsageDescription": "Usa Face ID para acceder a tu cuenta de Quiniela Pro de forma segura y r\u00e1pida."
       }
     },
     "android": {
@@ -34,7 +34,6 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-local-authentication",
       [
         "expo-splash-screen",
         {
