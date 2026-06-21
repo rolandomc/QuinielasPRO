@@ -210,7 +210,8 @@ export default function AdminScreen(){
       resetWizard();
       setJornadaSel(jData);
       setScreen('jornada_detalle');
-      avisar('✅ Quiniela creada',`"${jData.nombre}" lista${wSel.size>0?` con ${wSel.size} partido(s)`:''}${precio?` · $${precio} por quiniela`:''}`);\n    }catch(e:any){avisar('Error',e.message);}
+      avisar('✅ Quiniela creada',`"${jData.nombre}" lista${wSel.size>0?` con ${wSel.size} partido(s)`:''}${precio?` · $${precio} por quiniela`:''}`);
+    }catch(e:any){avisar('Error',e.message);}
     setWCreando(false);
   };
 
@@ -862,7 +863,6 @@ export default function AdminScreen(){
           {calculando&&<ActivityIndicator color={C.gold} size="large" style={{marginVertical:24}}/>}
           {!calculando&&resumenGanador&&(
             <ScrollView>
-              {/* Ganador banner */}
               <View style={[styles.ganadorBanner,{backgroundColor:C.goldDim,borderColor:C.gold}]}>
                 {resumenGanador.empate_perfecto
                   ?<Text style={styles.ganadorTitulo}>🤝 Empate — premio compartido</Text>
@@ -874,7 +874,6 @@ export default function AdminScreen(){
                   <Text style={styles.ganadorSub}>Org. {resumenGanador.porcentaje_organizador}%: ${(resumenGanador.bolsa_total-resumenGanador.bolsa_premio).toFixed(2)}</Text>
                 </View>
               </View>
-              {/* Posiciones */}
               {resumenGanador.posiciones.map(pos=>{
                 const medals=['🥇','🥈','🥉'];
                 const medal=pos.posicion<=3?medals[pos.posicion-1]:null;
@@ -911,7 +910,6 @@ export default function AdminScreen(){
     <View style={[styles.root,{paddingTop:insets.top}]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
-      {/* Header */}
       {mostrarNav&&(
         <View style={styles.header}>
           {screen!=='home'
@@ -932,7 +930,6 @@ export default function AdminScreen(){
         </View>
       )}
 
-      {/* Contenido */}
       <View style={{flex:1}}>
         {screen==='home'&&renderHome()}
         {screen==='crear_quiniela'&&renderCrearQuiniela()}
@@ -941,7 +938,6 @@ export default function AdminScreen(){
         {screen==='ingresos'&&renderIngresos()}
       </View>
 
-      {/* Bottom Nav */}
       {mostrarNav&&(
         <View style={[styles.bottomNav,{paddingBottom:insets.bottom+4}]}>
           {([
