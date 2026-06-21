@@ -17,10 +17,13 @@ const C = {
 };
 
 type Jornada   = { id: string; nombre: string; estado: string };
-type Posicion  = { usuario_id: string; username: string; aciertos: number; total_partidos: number; victorias?: number };
-type Partido   = { id: string; local: string; visitante: string; resultado_final: string | null; jornada_id: string; api_fixture_id?: number };
+type Posicion  = { usuario_id: string; username: string; aciertos: number; total_partidos: number };
+type Partido   = { id: string; local: string; visitante: string; resultado_final: string | null; jornada_id: string; api_fixture_id?: number | null };
 type LiveScore = { fixture_id: number; home: number | null; away: number | null; status: string; elapsed: number | null };
 type RankHist  = { usuario_id: string; username: string; victorias: number; top3: number; totalAciertos: number; jornadas: number };
+
+const LIVE_STATUS = ['1H', '2H', 'HT', 'ET', 'BT', 'P'];
+const STATUS_LABEL: Record<string, string> = { '1H': '1T', '2H': '2T', 'HT': 'ET', 'ET': 'Pról.', 'BT': 'Desc.', 'P': 'Pen.' };
 
 const golesAResultado = (h: number | null, a: number | null): '1' | 'X' | '2' | null => {
   if (h === null || a === null) return null;
@@ -33,7 +36,7 @@ function LiveDot() {
     Animated.loop(
       Animated.sequence([
         Animated.timing(anim, { toValue: 0.2, duration: 600, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1,   duration: 600, useNativeDriver: true }),
       ])
     ).start();
   }, []);
@@ -45,6 +48,7 @@ type TabRes = 'jornada' | 'historico';
 export default function ResultadosScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+
   const [tab, setTab]               = useState<TabRes>('jornada');
   const [jornadas, setJornadas]     = useState<Jornada[]>([]);
   const [jornadaSel, setJornadaSel] = useState<Jornada | null>(null);
@@ -57,24 +61,73 @@ export default function ResultadosScreen() {
   const [liveActivo, setLiveActivo] = useState(false);
   const [rankHist, setRankHist]     = useState<RankHist[]>([]);
   const [loadingHist, setLoadingHist] = useState(false);
-  const pollingRef = useRef<any>(null);
 
+  // Ref estable para el polling — evita recrear el intervalo con closures obsoletas
+  const partidosRef = useRef<Partido[]>([]);
+  const pollingRef  = useRef<any>(null);
+
+  // ── fetchLive: consulta TODOS los partidos con api_fixture_id (con o sin resultado_final) ──
+  const fetchLive = useCallback(async (ps: Partido[]) => {
+    // FIX 1: ya no filtramos por !resultado_final — así monitoreamos todos
+    const conApi = ps.filter(p => p.api_fixture_id);
+    if (conApi.length === 0) { setLiveActivo(false); return; }
+    try {
+      const ids = conApi.map(p => p.api_fixture_id).join('-');
+      const data = await apifb.fixtureById(ids);
+      if (!data?.response) return;
+      const map: Record<number, LiveScore> = {};
+      (data.response as any[]).forEach(f => {
+        map[f.fixture.id] = {
+          fixture_id: f.fixture.id,
+          home:    f.goals.home,
+          away:    f.goals.away,
+          status:  f.fixture.status.short,
+          elapsed: f.fixture.status.elapsed,
+        };
+      });
+      setLiveScores(map);
+      // FIX 2: setLiveActivo solo si alguno está realmente en juego ahora
+      setLiveActivo(Object.values(map).some(s => LIVE_STATUS.includes(s.status)));
+    } catch { /* silencio — la API puede fallar puntualmente */ }
+  }, []);
+
+  // ── iniciar / limpiar polling al cambiar lista de partidos ──
+  const iniciarPolling = useCallback((ps: Partido[]) => {
+    // Limpiar intervalo anterior
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    partidosRef.current = ps;
+
+    const conApi = ps.filter(p => p.api_fixture_id);
+    if (conApi.length === 0) { setLiveActivo(false); return; }
+
+    // FIX 3: primer fetch inmediato (no esperar 60s)
+    fetchLive(ps);
+
+    // FIX 4: intervalo cada 45s — más frecuente para marcadores en vivo
+    pollingRef.current = setInterval(() => fetchLive(partidosRef.current), 45000);
+  }, [fetchLive]);
+
+  // Limpiar al desmontar
+  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
+
+  // ── cargar jornada y partidos ──
   const cargar = useCallback(async (j?: Jornada) => {
     setLoading(true);
     const { data: jData } = await supabase
       .from('jornadas').select('id,nombre,estado')
-      .in('estado', ['cerrada', 'finalizada'])
+      .in('estado', ['abierta', 'cerrada', 'finalizada'])   // FIX 5: incluir 'abierta' para ver live de jornada activa
       .order('creado_at', { ascending: false });
     const lista: Jornada[] = jData || [];
-    setJornadas(lista);
-    const jornadaActual = j ?? lista[0] ?? null;
+    setJornadas(lista.filter(jj => jj.estado !== 'abierta')); // el selector solo muestra cerradas/finalizadas
+    const jornadaActual = j ?? lista.find(jj => jj.estado !== 'abierta') ?? null;
     setJornadaSel(jornadaActual);
     if (!jornadaActual) { setLoading(false); setRefreshing(false); return; }
 
     const { data: pData } = await supabase
       .from('partidos').select('id,local,visitante,resultado_final,jornada_id,api_fixture_id')
       .eq('jornada_id', jornadaActual.id).order('fecha');
-    setPartidos(pData || []);
+    const ps: Partido[] = pData || [];
+    setPartidos(ps);
 
     const { data: qData } = await supabase
       .from('quinielas').select('usuario_id,aciertos,usuarios(username,nombre)')
@@ -84,32 +137,39 @@ export default function ResultadosScreen() {
       usuario_id: q.usuario_id,
       username: q.usuarios?.username ? `@${q.usuarios.username}` : (q.usuarios?.nombre || 'Jugador'),
       aciertos: q.aciertos || 0,
-      total_partidos: pData?.length || 0,
+      total_partidos: ps.length,
     }));
     setPosiciones(tabla);
-    if (user) { const pos = tabla.findIndex(p => p.usuario_id === user.id); setMiPosicion(pos >= 0 ? pos + 1 : null); }
-    setLoading(false); setRefreshing(false);
-  }, [user]);
+    if (user) {
+      const pos = tabla.findIndex(p => p.usuario_id === user.id);
+      setMiPosicion(pos >= 0 ? pos + 1 : null);
+    }
 
+    // FIX 6: reiniciar polling cada vez que cambian los partidos (ej. cambio de jornada)
+    iniciarPolling(ps);
+
+    setLoading(false);
+    setRefreshing(false);
+  }, [user, iniciarPolling]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  // ── Ranking histórico ──
   const cargarHistorico = useCallback(async () => {
     setLoadingHist(true);
-    // Traer todas las quinielas finalizadas y pagadas con aciertos
     const { data: qAll } = await supabase
       .from('quinielas')
-      .select('usuario_id,aciertos,jornada_id,usuarios(username,nombre),jornadas(estado)')
+      .select('usuario_id,aciertos,jornada_id,usuarios(username,nombre)')
       .eq('estado_pago', 'pagado');
-
     if (!qAll) { setLoadingHist(false); return; }
 
-    // Traer cuantos partidos tiene cada jornada
     const { data: jornadasAll } = await supabase
       .from('jornadas').select('id').in('estado', ['cerrada', 'finalizada']);
     const jornadasIds = new Set((jornadasAll || []).map((j: any) => j.id));
 
-    // Agrupar por usuario
     const mapaUser: Record<string, RankHist> = {};
     for (const q of qAll) {
-      if (!jornadasIds.has(q.jornada_id)) continue; // solo jornadas finalizadas
+      if (!jornadasIds.has(q.jornada_id)) continue;
       const uid = q.usuario_id;
       const uname = (q.usuarios as any)?.username
         ? `@${(q.usuarios as any).username}`
@@ -121,7 +181,6 @@ export default function ResultadosScreen() {
       mapaUser[uid].jornadas += 1;
     }
 
-    // Calcular victorias y top3 por jornada
     const quinielasPorJornada: Record<string, typeof qAll> = {};
     for (const q of qAll) {
       if (!quinielasPorJornada[q.jornada_id]) quinielasPorJornada[q.jornada_id] = [];
@@ -137,54 +196,37 @@ export default function ResultadosScreen() {
       });
     }
 
-    const lista = Object.values(mapaUser)
-      .sort((a, b) => b.victorias !== a.victorias ? b.victorias - a.victorias : b.totalAciertos - a.totalAciertos);
-    setRankHist(lista);
+    setRankHist(
+      Object.values(mapaUser).sort((a, b) =>
+        b.victorias !== a.victorias ? b.victorias - a.victorias : b.totalAciertos - a.totalAciertos
+      )
+    );
     setLoadingHist(false);
   }, []);
 
-  const fetchLive = useCallback(async (ps: Partido[]) => {
-    const conApi = ps.filter(p => p.api_fixture_id && !p.resultado_final);
-    if (conApi.length === 0) { setLiveActivo(false); return; }
-    try {
-      const ids = conApi.map(p => p.api_fixture_id).join('-');
-      const data = await apifb.fixtureById(ids);
-      const map: Record<number, LiveScore> = {};
-      (data.response || []).forEach((f: any) => {
-        map[f.fixture.id] = { fixture_id: f.fixture.id, home: f.goals.home, away: f.goals.away, status: f.fixture.status.short, elapsed: f.fixture.status.elapsed };
-      });
-      setLiveScores(map);
-      setLiveActivo(Object.values(map).some(s => ['1H', '2H', 'HT', 'ET', 'BT', 'P'].includes(s.status)));
-    } catch { }
-  }, []);
+  useEffect(() => { if (tab === 'historico') cargarHistorico(); }, [tab]);
 
-  useEffect(() => { cargar(); }, [cargar]);
-  useEffect(() => {
-    if (tab === 'historico') cargarHistorico();
-  }, [tab]);
-  useEffect(() => {
-    if (partidos.length === 0) return;
-    fetchLive(partidos);
-    pollingRef.current = setInterval(() => fetchLive(partidos), 60000);
-    return () => clearInterval(pollingRef.current);
-  }, [partidos]);
-
-  const hayResultados = partidos.some(p => p.resultado_final);
-  const medallaColor  = (i: number) => i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : C.textSub;
-  const medalla       = (i: number) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
-
-  const LIVE_STATUS = ['1H', '2H', 'HT', 'ET', 'BT', 'P'];
-  const STATUS_LABEL: Record<string, string> = { '1H': '1T', '2H': '2T', 'HT': 'ET', 'ET': 'Pról.', 'BT': 'Desc.', 'P': 'Pen.' };
+  // ── helpers ──
+  const hayResultados  = partidos.some(p => p.resultado_final);
+  const medallaColor   = (i: number) => i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : C.textSub;
+  const medalla        = (i: number) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
 
   const renderPartido = (p: Partido) => {
     const live = p.api_fixture_id ? liveScores[p.api_fixture_id] : null;
     const res  = p.resultado_final;
-    const resEfectivo  = res ?? (live ? golesAResultado(live.home, live.away) : null);
-    const localGana    = resEfectivo === '1';
-    const visitanteGana= resEfectivo === '2';
-    const empate       = resEfectivo === 'X';
-    const enVivo       = live && LIVE_STATUS.includes(live.status);
-    const finalizado   = live?.status === 'FT' || !!res;
+
+    // Mostrar marcador live incluso si ya hay resultado_final registrado (puede estar desactualizado)
+    const golesHome = live?.home ?? null;
+    const golesAway = live?.away ?? null;
+    const resEfectivo   = golesHome !== null ? golesAResultado(golesHome, golesAway) : (res as any ?? null);
+    const localGana     = resEfectivo === '1';
+    const visitanteGana = resEfectivo === '2';
+    const empate        = resEfectivo === 'X';
+    const enVivo        = !!live && LIVE_STATUS.includes(live.status);
+    // FT de la API o resultado_final ya guardado
+    const finalizado    = live?.status === 'FT' || live?.status === 'AET' || live?.status === 'PEN' || (!!res && !enVivo);
+    // Mostrar goles si tenemos datos de la API O si hay resultado registrado manualmente
+    const mostrarGoles  = enVivo || finalizado || !!res;
 
     return (
       <View key={p.id} style={[styles.partidoCard, enVivo && styles.partidoCardLive]}>
@@ -198,25 +240,30 @@ export default function ResultadosScreen() {
           </View>
         )}
         <View style={styles.partidoRow}>
+          {/* Local */}
           <View style={[styles.equipoBox, localGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
             <Text style={[styles.equipoNombre, localGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.local}</Text>
-            {(enVivo || finalizado) && live?.home !== null && live?.home !== undefined && (
-              <Text style={[styles.goles, localGana && { color: C.green }]}>{live!.home}</Text>
+            {mostrarGoles && golesHome !== null && (
+              <Text style={[styles.goles, localGana && { color: C.green }, empate && { color: C.orange }]}>{golesHome}</Text>
             )}
           </View>
+
+          {/* Centro */}
           <View style={styles.centroCol}>
             {!enVivo && !finalizado && <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>VS</Text></View>}
-            {enVivo && <Text style={styles.vsLive}>:</Text>}
+            {enVivo  && <Text style={styles.vsLive}>:</Text>}
             {finalizado && !enVivo && (
               <View style={empate ? styles.empateBadge : styles.ftBadge}>
                 <Text style={empate ? styles.empateTexto : styles.ftTexto}>{empate ? 'EMP' : 'FT'}</Text>
               </View>
             )}
           </View>
+
+          {/* Visitante */}
           <View style={[styles.equipoBox, visitanteGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
             <Text style={[styles.equipoNombre, visitanteGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.visitante}</Text>
-            {(enVivo || finalizado) && live?.away !== null && live?.away !== undefined && (
-              <Text style={[styles.goles, visitanteGana && { color: C.green }]}>{live!.away}</Text>
+            {mostrarGoles && golesAway !== null && (
+              <Text style={[styles.goles, visitanteGana && { color: C.green }, empate && { color: C.orange }]}>{golesAway}</Text>
             )}
           </View>
         </View>
@@ -229,7 +276,13 @@ export default function ResultadosScreen() {
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <ScrollView
         style={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); cargar(jornadaSel ?? undefined); }} tintColor={C.accent} colors={[C.accent]} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); cargar(jornadaSel ?? undefined); }}
+            tintColor={C.accent} colors={[C.accent]}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
@@ -250,7 +303,7 @@ export default function ResultadosScreen() {
           )}
         </View>
 
-        {/* Tabs Jornada / Histórico */}
+        {/* Tabs */}
         <View style={styles.tabsRow}>
           <TouchableOpacity style={[styles.tabBtn, tab === 'jornada' && styles.tabActivo]} onPress={() => setTab('jornada')} activeOpacity={0.8}>
             <Ionicons name="trophy-outline" size={14} color={tab === 'jornada' ? C.accent : C.textSub} />
@@ -336,10 +389,8 @@ export default function ResultadosScreen() {
             ) : (
               <>
                 <Text style={[styles.seccionTitulo, { marginBottom: 12 }]}>🏆 Ranking de Campeones</Text>
-                {/* Podio top 3 */}
                 {rankHist.length >= 3 && (
                   <View style={styles.podioRow}>
-                    {/* 2do lugar */}
                     <View style={[styles.podioPuesto, { marginTop: 20 }]}>
                       <Text style={styles.podioMedalla}>🥈</Text>
                       <Text style={styles.podioNombre} numberOfLines={1}>{rankHist[1].username}</Text>
@@ -347,7 +398,6 @@ export default function ResultadosScreen() {
                         <Text style={[styles.podioBadgeTexto, { color: '#c0c0c0' }]}>{rankHist[1].victorias} 🏆</Text>
                       </View>
                     </View>
-                    {/* 1er lugar */}
                     <View style={[styles.podioPuesto, styles.podioPrimero]}>
                       <Text style={{ fontSize: 36 }}>👑</Text>
                       <Text style={styles.podioMedalla}>🥇</Text>
@@ -356,7 +406,6 @@ export default function ResultadosScreen() {
                         <Text style={[styles.podioBadgeTexto, { color: C.gold }]}>{rankHist[0].victorias} 🏆</Text>
                       </View>
                     </View>
-                    {/* 3er lugar */}
                     <View style={[styles.podioPuesto, { marginTop: 32 }]}>
                       <Text style={styles.podioMedalla}>🥉</Text>
                       <Text style={styles.podioNombre} numberOfLines={1}>{rankHist[2].username}</Text>
@@ -366,7 +415,6 @@ export default function ResultadosScreen() {
                     </View>
                   </View>
                 )}
-                {/* Lista completa */}
                 <View style={styles.tablaWrap}>
                   <View style={styles.tablaHeader}>
                     <Text style={[styles.col, styles.colNum]}>#</Text>
@@ -411,13 +459,11 @@ const styles = StyleSheet.create({
   liveDotAnim: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.red },
   miPosBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: 'rgba(255,215,0,0.1)', borderWidth: 1, borderColor: 'rgba(255,215,0,0.3)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
   miPosText: { color: C.gold, fontSize: 13, fontWeight: '700' },
-  // Tabs
   tabsRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 14, gap: 8 },
   tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: C.card },
   tabActivo: { borderColor: C.accent, backgroundColor: C.accentDim },
   tabTexto: { color: C.textSub, fontWeight: '700', fontSize: 13 },
   tabTextoActivo: { color: C.accent },
-  //
   jornadasScroll: { marginBottom: 12 },
   jornadaBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: '#2a2a40', backgroundColor: C.card, maxWidth: 160 },
   jornadaBtnActivo: { backgroundColor: C.accentDim, borderColor: C.accent },
@@ -425,7 +471,6 @@ const styles = StyleSheet.create({
   jornadaTextoActivo: { color: C.accent },
   seccion: { backgroundColor: C.card, marginHorizontal: 16, marginBottom: 12, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.cardBorder },
   seccionTitulo: { color: C.text, fontWeight: 'bold', fontSize: 15, marginBottom: 14 },
-  // Partido card
   partidoCard: { borderRadius: 12, marginBottom: 10, overflow: 'hidden', borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: '#12121f' },
   partidoCardLive: { borderColor: C.red, shadowColor: C.red, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } },
   liveBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,107,107,0.12)', paddingHorizontal: 12, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: 'rgba(255,107,107,0.2)' },
@@ -461,7 +506,6 @@ const styles = StyleSheet.create({
   colAciertosWrap: { width: 70, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'baseline' },
   aciertosNum: { fontSize: 18, fontWeight: 'bold', color: C.text },
   aciertosTotal: { fontSize: 12, color: C.textSub, marginLeft: 1 },
-  // Podio
   podioRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', marginBottom: 20, gap: 8 },
   podioPuesto: { flex: 1, alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.cardBorder },
   podioPrimero: { backgroundColor: 'rgba(255,215,0,0.05)', borderColor: 'rgba(255,215,0,0.3)', paddingTop: 8 },
@@ -469,5 +513,4 @@ const styles = StyleSheet.create({
   podioNombre: { color: C.text, fontSize: 11, fontWeight: 'bold', textAlign: 'center', marginBottom: 6 },
   podioBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   podioBadgeTexto: { fontSize: 11, fontWeight: '800' },
-  gold: { color: C.gold },
 });
