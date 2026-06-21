@@ -13,10 +13,10 @@ import { apifb } from '../lib/apiFootball';
 const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700' };
 
 type Partido  = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean; resultado_final:string|null; api_fixture_id:number|null };
-type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string };
-type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuarios:{nombre:string;username:string}|null };
+type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string; precio?:number|null };
+type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
 type Fixture  = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}}; goals?:{home:number|null;away:number|null} };
-type TabAdmin = 'jornadas'|'importar'|'quinielas';
+type TabAdmin = 'jornadas'|'importar'|'quinielas'|'pagos';
 
 const LIGAS_POPULARES = [
   { nombre:'FIFA World Cup',   id:'2000', temporada:'2026' },
@@ -38,7 +38,6 @@ export default function AdminScreen() {
   const [partidos, setPartidos]   = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading]     = useState(true);
-  // FIX: estado individual por jornada en vez de un boolean global
   const [syncingByJornada, setSyncingByJornada] = useState<Record<string, boolean>>({});
   const [borrando, setBorrando]   = useState<string|null>(null);
 
@@ -63,6 +62,13 @@ export default function AdminScreen() {
   const [jornadaDestino, setJornadaDestino] = useState<string>('');
   const [importando, setImportando] = useState(false);
 
+  // --- Pagos ---
+  const [jornadaPagoSel, setJornadaPagoSel] = useState<string|null>(null);
+  const [modalPrecio, setModalPrecio] = useState(false);
+  const [jornadaPrecioSel, setJornadaPrecioSel] = useState<Jornada|null>(null);
+  const [precioInput, setPrecioInput] = useState('');
+  const [savingPrecio, setSavingPrecio] = useState(false);
+
   useEffect(() => {
     if (!usuario?.es_admin) { Alert.alert('Acceso denegado'); router.back(); return; }
     cargarDatos();
@@ -73,7 +79,7 @@ export default function AdminScreen() {
     const [{ data:j },{ data:p },{ data:q }] = await Promise.all([
       supabase.from('jornadas').select('*').order('creado_at', { ascending:false }),
       supabase.from('partidos').select('*').order('fecha'),
-      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuarios(nombre,username)'),
+      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuario_id,usuarios(nombre,username)'),
     ]);
     if (j) setJornadas(j);
     if (p) setPartidos(p);
@@ -91,155 +97,106 @@ export default function AdminScreen() {
   };
 
   const cerrarJornada = (j: Jornada) => {
-    Alert.alert(
-      'Cerrar jornada',
-      `¿Cerrar "${j.nombre}"?\nSe cerrarán todos los partidos y los usuarios ya no podrán editar.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Cerrar', style: 'destructive', onPress: async () => {
-          await supabase.from('jornadas').update({ estado: 'cerrada' }).eq('id', j.id);
-          await supabase.from('partidos').update({ cerrado: true }).eq('jornada_id', j.id);
-          cargarDatos();
-          Alert.alert('✅ Jornada cerrada');
-        }},
-      ]
-    );
+    Alert.alert('Cerrar jornada', `¿Cerrar "${j.nombre}"?\nSe cerrarán todos los partidos.`,
+      [{ text:'Cancelar', style:'cancel' },
+       { text:'Cerrar', style:'destructive', onPress: async () => {
+          await supabase.from('jornadas').update({ estado:'cerrada' }).eq('id', j.id);
+          await supabase.from('partidos').update({ cerrado:true }).eq('jornada_id', j.id);
+          cargarDatos(); Alert.alert('✅ Jornada cerrada');
+        }}]);
   };
 
   const finalizarJornada = (j: Jornada) => {
-    Alert.alert(
-      'Finalizar jornada',
-      `¿Marcar "${j.nombre}" como FINALIZADA?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Finalizar', onPress: async () => {
-          await supabase.from('jornadas').update({ estado: 'finalizada' }).eq('id', j.id);
+    Alert.alert('Finalizar jornada', `¿Marcar "${j.nombre}" como FINALIZADA?`,
+      [{ text:'Cancelar', style:'cancel' },
+       { text:'Finalizar', onPress: async () => {
+          await supabase.from('jornadas').update({ estado:'finalizada' }).eq('id', j.id);
           cargarDatos();
-        }},
-      ]
-    );
+        }}]);
   };
 
   const borrarJornada = (j: Jornada) => {
-    Alert.alert(
-      '⚠️ Borrar jornada',
+    Alert.alert('⚠️ Borrar jornada',
       `¿Eliminar "${j.nombre}" permanentemente?\n\nSe borrarán todos sus partidos, quinielas y predicciones. Esta acción NO se puede deshacer.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Borrar', style: 'destructive',
-          onPress: async () => {
-            setBorrando(j.id);
-            try {
-              const { data: psDB, error: psErr } = await supabase
-                .from('partidos').select('id').eq('jornada_id', j.id);
-              if (psErr) throw new Error('Error leyendo partidos: ' + psErr.message);
-              const psIds = (psDB || []).map((p: any) => p.id);
-              if (psIds.length > 0) {
-                const { error: predErr } = await supabase
-                  .from('predicciones').delete().in('partido_id', psIds);
-                if (predErr) throw new Error('Error borrando predicciones: ' + predErr.message);
-              }
-              const { error: qErr } = await supabase
-                .from('quinielas').delete().eq('jornada_id', j.id);
-              if (qErr) throw new Error('Error borrando quinielas: ' + qErr.message);
-              const { error: pErr } = await supabase
-                .from('partidos').delete().eq('jornada_id', j.id);
-              if (pErr) throw new Error('Error borrando partidos: ' + pErr.message);
-              const { error: jErr } = await supabase
-                .from('jornadas').delete().eq('id', j.id);
-              if (jErr) throw new Error('Error borrando jornada: ' + jErr.message);
-              await cargarDatos();
-              Alert.alert('🗑️ Jornada eliminada', `"${j.nombre}" fue eliminada correctamente.`);
-            } catch (e: any) {
-              Alert.alert('❌ Error al borrar', e.message);
-              await cargarDatos();
-            } finally {
-              setBorrando(null);
-            }
-          },
-        },
-      ]
-    );
+      [{ text:'Cancelar', style:'cancel' },
+       { text:'Borrar', style:'destructive', onPress: async () => {
+          setBorrando(j.id);
+          try {
+            const { data:psDB } = await supabase.from('partidos').select('id').eq('jornada_id', j.id);
+            const psIds = (psDB||[]).map((p:any)=>p.id);
+            if (psIds.length>0) await supabase.from('predicciones').delete().in('partido_id', psIds);
+            await supabase.from('quinielas').delete().eq('jornada_id', j.id);
+            await supabase.from('partidos').delete().eq('jornada_id', j.id);
+            await supabase.from('jornadas').delete().eq('id', j.id);
+            await cargarDatos();
+            Alert.alert('🗑️ Jornada eliminada', `"${j.nombre}" fue eliminada.`);
+          } catch(e:any) { Alert.alert('❌ Error', e.message); await cargarDatos(); }
+          finally { setBorrando(null); }
+        }}]);
   };
 
   const sincronizarResultados = async (j: Jornada) => {
     if (!j.api_competition_id || !j.api_season || !j.api_matchday) {
-      Alert.alert('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.');
+      Alert.alert('Sin datos API','Esta jornada no tiene competition_id, season o matchday configurados.');
       return;
     }
-    // FIX: solo activa el spinner de esta jornada
-    setSyncingByJornada(prev => ({ ...prev, [j.id]: true }));
+    setSyncingByJornada(prev=>({...prev,[j.id]:true}));
     try {
       const round = `Regular Season - ${j.api_matchday}`;
       const data  = await apifb.fixturesPorRound(j.api_competition_id, j.api_season, round);
       const matches: Fixture[] = data.response || [];
-      if (!matches.length) {
-        Alert.alert('Sin datos', 'La API no devolvió partidos.');
-        return;
-      }
-      const ps = partidos.filter(p => p.jornada_id === j.id && p.api_fixture_id);
+      if (!matches.length) { Alert.alert('Sin datos','La API no devolvió partidos.'); return; }
+      const ps = partidos.filter(p=>p.jornada_id===j.id && p.api_fixture_id);
       let actualizados = 0;
       for (const p of ps) {
-        const match = matches.find(m => m.fixture.id === p.api_fixture_id);
+        const match = matches.find(m=>m.fixture.id===p.api_fixture_id);
         if (!match) continue;
         const goals = match.goals;
-        if (goals?.home == null || goals?.away == null) continue;
-        if (match.fixture.status.short !== 'FT') continue;
-        const home = goals.home;
-        const away = goals.away;
-        const res  = home > away ? '1' : away > home ? '2' : 'X';
-        // FIX: filtra por jornada_id para que solo actualice la jornada correcta
-        await supabase
-          .from('partidos')
-          .update({ resultado_final: res, cerrado: true })
-          .eq('id', p.id)
-          .eq('jornada_id', j.id);
+        if (goals?.home==null||goals?.away==null) continue;
+        if (match.fixture.status.short!=='FT') continue;
+        const res = goals.home>goals.away?'1':goals.away>goals.home?'2':'X';
+        await supabase.from('partidos').update({resultado_final:res,cerrado:true}).eq('id',p.id).eq('jornada_id',j.id);
         actualizados++;
       }
-      if (actualizados > 0) await recalcularAciertos(j.id);
+      if (actualizados>0) await recalcularAciertos(j.id);
       await cargarDatos();
-      Alert.alert('✅ Sincronizado', `${actualizados} resultado(s) actualizados en "${j.nombre}".`);
-    } catch (e) {
-      Alert.alert('Error', String(e));
-    } finally {
-      // FIX: solo desactiva el spinner de esta jornada
-      setSyncingByJornada(prev => ({ ...prev, [j.id]: false }));
-    }
+      Alert.alert('✅ Sincronizado',`${actualizados} resultado(s) en "${j.nombre}".`);
+    } catch(e) { Alert.alert('Error',String(e)); }
+    finally { setSyncingByJornada(prev=>({...prev,[j.id]:false})); }
   };
 
-  const recalcularAciertos = async (jornada_id: string) => {
-    const { data: pJs } = await supabase.from('partidos').select('id,resultado_final').eq('jornada_id', jornada_id).not('resultado_final','is',null);
+  const recalcularAciertos = async (jornada_id:string) => {
+    const { data:pJs } = await supabase.from('partidos').select('id,resultado_final').eq('jornada_id',jornada_id).not('resultado_final','is',null);
     if (!pJs?.length) return;
-    const ids = pJs.map(p => p.id);
-    const { data: qJs } = await supabase.from('quinielas').select('id,usuario_id').eq('jornada_id', jornada_id);
-    for (const q of (qJs || [])) {
-      const { data: preds } = await supabase.from('predicciones').select('partido_id,resultado').eq('usuario_id', q.usuario_id).in('partido_id', ids);
-      const aciertos = (preds || []).filter(pr => pJs.find(x => x.id === pr.partido_id)?.resultado_final === pr.resultado).length;
-      await supabase.from('quinielas').update({ aciertos }).eq('id', q.id);
+    const ids = pJs.map(p=>p.id);
+    const { data:qJs } = await supabase.from('quinielas').select('id,usuario_id').eq('jornada_id',jornada_id);
+    for (const q of (qJs||[])) {
+      const { data:preds } = await supabase.from('predicciones').select('partido_id,resultado').eq('usuario_id',q.usuario_id).in('partido_id',ids);
+      const aciertos = (preds||[]).filter(pr=>pJs.find(x=>x.id===pr.partido_id)?.resultado_final===pr.resultado).length;
+      await supabase.from('quinielas').update({aciertos}).eq('id',q.id);
     }
   };
 
   const guardarResultado = async () => {
-    if (!resultadoInput || !partidoSel) return;
+    if (!resultadoInput||!partidoSel) return;
     setSaving(true);
-    await supabase.from('partidos').update({ resultado_final: resultadoInput, cerrado: true }).eq('id', partidoSel.id);
+    await supabase.from('partidos').update({resultado_final:resultadoInput,cerrado:true}).eq('id',partidoSel.id);
     await recalcularAciertos(partidoSel.jornada_id);
     setSaving(false); setModalResultado(false); cargarDatos();
   };
 
   const buscarFixtures = async () => {
-    if (!ligaId || !temporada) { Alert.alert('Faltan datos'); return; }
+    if (!ligaId||!temporada) { Alert.alert('Faltan datos'); return; }
     setLoadingFix(true); setFixtures([]); setSeleccionados(new Set());
     try {
       let data;
-      if (modoBusqueda === 'fecha') data = await apifb.fixtures(ligaId, temporada, fechaBusqueda);
-      else if (modoBusqueda === 'semana') data = await apifb.fixturesPorSemana(ligaId, temporada, fechaDesde, fechaHasta);
-      else data = await apifb.fixturesPorRound(ligaId, temporada, `Regular Season - ${roundInput}`);
-      const res: Fixture[] = data.response || [];
+      if (modoBusqueda==='fecha') data = await apifb.fixtures(ligaId,temporada,fechaBusqueda);
+      else if (modoBusqueda==='semana') data = await apifb.fixturesPorSemana(ligaId,temporada,fechaDesde,fechaHasta);
+      else data = await apifb.fixturesPorRound(ligaId,temporada,`Regular Season - ${roundInput}`);
+      const res:Fixture[] = data.response||[];
       setFixtures(res);
-      if (!res.length) Alert.alert('Sin partidos', `No hay partidos para liga ${ligaId}, temporada ${temporada}.`);
-    } catch (e) { Alert.alert('Error', String(e)); }
+      if (!res.length) Alert.alert('Sin partidos',`No hay partidos para liga ${ligaId}, temporada ${temporada}.`);
+    } catch(e) { Alert.alert('Error',String(e)); }
     setLoadingFix(false);
   };
 
@@ -247,44 +204,55 @@ export default function AdminScreen() {
     if (!seleccionados.size) { Alert.alert('Selecciona partidos'); return; }
     if (!jornadaDestino) { Alert.alert('Selecciona jornada destino'); return; }
     setImportando(true);
-    const jDest = jornadas.find(j => j.id === jornadaDestino);
-    const inserts = fixtures
-      .filter(f => seleccionados.has(f.fixture.id))
-      .map(f => ({
-        local: f.teams.home.name,
-        visitante: f.teams.away.name,
-        fecha: f.fixture.date,
-        jornada: 0,
-        jornada_id: jornadaDestino,
-        cerrado: false,
-        api_fixture_id: f.fixture.id,
-      }));
-    if (modoBusqueda === 'jornada' && jDest) {
-      await supabase.from('jornadas').update({
-        api_competition_id: ligaId,
-        api_season: temporada,
-        api_matchday: roundInput,
-      }).eq('id', jornadaDestino);
+    const jDest = jornadas.find(j=>j.id===jornadaDestino);
+    const inserts = fixtures.filter(f=>seleccionados.has(f.fixture.id)).map(f=>({
+      local:f.teams.home.name, visitante:f.teams.away.name, fecha:f.fixture.date,
+      jornada:0, jornada_id:jornadaDestino, cerrado:false, api_fixture_id:f.fixture.id,
+    }));
+    if (modoBusqueda==='jornada'&&jDest) {
+      await supabase.from('jornadas').update({api_competition_id:ligaId,api_season:temporada,api_matchday:roundInput}).eq('id',jornadaDestino);
     }
     const { error } = await supabase.from('partidos').insert(inserts);
     setImportando(false);
-    if (error) { Alert.alert('Error', error.message); return; }
-    Alert.alert('✅ Importados', `${inserts.length} partidos en "${jDest?.nombre}".`);
-    setFixtures([]); setSeleccionados(new Set());
-    setTab('jornadas'); cargarDatos();
+    if (error) { Alert.alert('Error',error.message); return; }
+    Alert.alert('✅ Importados',`${inserts.length} partidos en "${jDest?.nombre}".`);
+    setFixtures([]); setSeleccionados(new Set()); setTab('jornadas'); cargarDatos();
   };
 
-  const marcarPagado = async (qId: string) => {
-    await supabase.from('quinielas').update({ estado_pago: 'pagado' }).eq('id', qId);
+  const marcarPagado = async (qId:string) => {
+    await supabase.from('quinielas').update({estado_pago:'pagado'}).eq('id',qId);
     cargarDatos();
+  };
+
+  const marcarPendiente = async (qId:string) => {
+    await supabase.from('quinielas').update({estado_pago:'pendiente'}).eq('id',qId);
+    cargarDatos();
+  };
+
+  const guardarPrecio = async () => {
+    if (!jornadaPrecioSel) return;
+    const precio = parseFloat(precioInput.replace(',','.'));
+    if (isNaN(precio)||precio<0) { Alert.alert('Precio inválido','Ingresa un número válido mayor o igual a 0.'); return; }
+    setSavingPrecio(true);
+    const { error } = await supabase.from('jornadas').update({ precio }).eq('id', jornadaPrecioSel.id);
+    setSavingPrecio(false);
+    if (error) { Alert.alert('Error', error.message); return; }
+    setModalPrecio(false); cargarDatos();
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
 
-  const pagados    = quinielas.filter(q => q.estado_pago === 'pagado').length;
-  const pendientes = quinielas.filter(q => q.estado_pago === 'pendiente').length;
-  const statusColor = (s:string) => s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
-  const estadoColor = (e:string) => e==='abierta'?C.green:e==='cerrada'?C.orange:C.textSub;
+  const pagados    = quinielas.filter(q=>q.estado_pago==='pagado').length;
+  const pendientes = quinielas.filter(q=>q.estado_pago==='pendiente').length;
+  const statusColor = (s:string)=>s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
+  const estadoColor = (e:string)=>e==='abierta'?C.green:e==='cerrada'?C.orange:C.textSub;
+
+  // Calcular recaudación total de la pestaña pagos
+  const recaudacionTotal = jornadas.reduce((sum,j)=>{
+    const precio = j.precio||0;
+    const pagadasJ = quinielas.filter(q=>q.jornada_id===j.id&&q.estado_pago==='pagado').length;
+    return sum + precio*pagadasJ;
+  },0);
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS==='ios'?'padding':'height'}>
@@ -302,39 +270,36 @@ export default function AdminScreen() {
         <View style={styles.stat}><Text style={styles.statNum}>{jornadas.filter(j=>j.estado==='abierta').length}</Text><Text style={styles.statLabel}>Abiertas</Text></View>
         <View style={styles.stat}><Text style={[styles.statNum,{color:C.green}]}>{pagados}</Text><Text style={styles.statLabel}>Pagados</Text></View>
         <View style={styles.stat}><Text style={[styles.statNum,{color:C.orange}]}>{pendientes}</Text><Text style={styles.statLabel}>Pendientes</Text></View>
-        <View style={styles.stat}><Text style={styles.statNum}>{quinielas.length}</Text><Text style={styles.statLabel}>Total</Text></View>
+        <View style={styles.stat}><Text style={[styles.statNum,{color:C.gold}]}>${recaudacionTotal.toFixed(0)}</Text><Text style={styles.statLabel}>Recaudado</Text></View>
       </View>
 
-      <View style={styles.tabs}>
-        {(['jornadas','importar','quinielas'] as TabAdmin[]).map(t=>(
+      {/* TABS — 4 pestañas con scroll horizontal */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabsContent}>
+        {(['jornadas','importar','quinielas','pagos'] as TabAdmin[]).map(t=>(
           <TouchableOpacity key={t} style={[styles.tabBtn,tab===t&&styles.tabActivo]} onPress={()=>setTab(t)}>
             <Text style={[styles.tabTexto,tab===t&&styles.tabTextoActivo]}>
-              {t==='jornadas'?'📅 Jornadas':t==='importar'?'📡 Importar':'📋 Quinielas'}
+              {t==='jornadas'?'📅 Jornadas':t==='importar'?'📡 Importar':t==='quinielas'?'📋 Quinielas':'💰 Pagos'}
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       <ScrollView style={{flex:1}} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingBottom:insets.bottom+40}}>
 
+        {/* ───────────── JORNADAS ───────────── */}
         {tab==='jornadas' && (
           <View style={{padding:16}}>
             <TouchableOpacity style={styles.btnNueva} onPress={()=>setModalNueva(true)} activeOpacity={0.8}>
               <Ionicons name="add-circle" size={18} color={C.accent}/>
               <Text style={styles.btnNuevaTexto}>Nueva jornada</Text>
             </TouchableOpacity>
-
-            {jornadas.length===0 && (
-              <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay jornadas. Crea una para empezar.</Text></View>
-            )}
-
-            {jornadas.map(j => {
-              const pJ = partidos.filter(p => p.jornada_id === j.id);
-              const conRes = pJ.filter(p => p.resultado_final).length;
-              const isOpen = j.estado === 'abierta';
-              const isCerrada = j.estado === 'cerrada';
-              const esBorrando = borrando === j.id;
-              // FIX: spinner individual por jornada
+            {jornadas.length===0 && <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay jornadas. Crea una para empezar.</Text></View>}
+            {jornadas.map(j=>{
+              const pJ = partidos.filter(p=>p.jornada_id===j.id);
+              const conRes = pJ.filter(p=>p.resultado_final).length;
+              const isOpen = j.estado==='abierta';
+              const isCerrada = j.estado==='cerrada';
+              const esBorrando = borrando===j.id;
               const syncing = !!syncingByJornada[j.id];
               return (
                 <View key={j.id} style={styles.jornadaCard}>
@@ -347,53 +312,39 @@ export default function AdminScreen() {
                       <View style={[styles.estadoBadge,{borderColor:estadoColor(j.estado)}]}>
                         <Text style={[styles.estadoTexto,{color:estadoColor(j.estado)}]}>{j.estado.toUpperCase()}</Text>
                       </View>
-                      <TouchableOpacity onPress={() => borrarJornada(j)} style={styles.btnTrash} disabled={esBorrando}>
-                        {esBorrando
-                          ? <ActivityIndicator size="small" color={C.red}/>
-                          : <Ionicons name="trash-outline" size={16} color={C.red}/>
-                        }
+                      <TouchableOpacity onPress={()=>borrarJornada(j)} style={styles.btnTrash} disabled={esBorrando}>
+                        {esBorrando?<ActivityIndicator size="small" color={C.red}/>:<Ionicons name="trash-outline" size={16} color={C.red}/>}
                       </TouchableOpacity>
                     </View>
                   </View>
-
-                  {pJ.map(p => (
+                  {pJ.map(p=>(
                     <View key={p.id} style={styles.partidoRow}>
                       <View style={{flex:1}}>
                         <Text style={styles.partidoTexto}>{p.local} vs {p.visitante}</Text>
                         <Text style={styles.partidoFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
                       </View>
                       {p.resultado_final
-                        ? <View style={styles.resBadge}><Text style={styles.resTexto}>{p.resultado_final}</Text></View>
-                        : <TouchableOpacity style={styles.btnRes} onPress={()=>{setPartidoSel(p);setResultadoInput(null);setModalResultado(true);}}>
-                            <Text style={styles.btnResTexto}>+ Resultado</Text>
-                          </TouchableOpacity>
+                        ?<View style={styles.resBadge}><Text style={styles.resTexto}>{p.resultado_final}</Text></View>
+                        :<TouchableOpacity style={styles.btnRes} onPress={()=>{setPartidoSel(p);setResultadoInput(null);setModalResultado(true);}}>
+                           <Text style={styles.btnResTexto}>+ Resultado</Text>
+                         </TouchableOpacity>
                       }
                     </View>
                   ))}
-
                   <View style={styles.jornadaAcciones}>
-                    {isOpen && (
+                    {isOpen&&(
                       <TouchableOpacity style={[styles.accionBtn,{backgroundColor:C.orange}]} onPress={()=>cerrarJornada(j)}>
-                        <Ionicons name="lock-closed" size={13} color="#fff"/>
-                        <Text style={styles.accionTexto}>Cerrar todo</Text>
+                        <Ionicons name="lock-closed" size={13} color="#fff"/><Text style={styles.accionTexto}>Cerrar todo</Text>
                       </TouchableOpacity>
                     )}
-                    {(isOpen || isCerrada) && j.api_competition_id && (
-                      <TouchableOpacity
-                        style={[styles.accionBtn,{backgroundColor:C.accent},syncing&&{opacity:0.6}]}
-                        onPress={()=>sincronizarResultados(j)}
-                        disabled={syncing}
-                      >
-                        {syncing
-                          ? <ActivityIndicator color="#fff" size="small"/>
-                          : <><Ionicons name="sync" size={13} color="#fff"/><Text style={styles.accionTexto}>Sincronizar API</Text></>
-                        }
+                    {(isOpen||isCerrada)&&j.api_competition_id&&(
+                      <TouchableOpacity style={[styles.accionBtn,{backgroundColor:C.accent},syncing&&{opacity:0.6}]} onPress={()=>sincronizarResultados(j)} disabled={syncing}>
+                        {syncing?<ActivityIndicator color="#fff" size="small"/>:<><Ionicons name="sync" size={13} color="#fff"/><Text style={styles.accionTexto}>Sincronizar API</Text></>}
                       </TouchableOpacity>
                     )}
-                    {isCerrada && (
+                    {isCerrada&&(
                       <TouchableOpacity style={[styles.accionBtn,{backgroundColor:C.green}]} onPress={()=>finalizarJornada(j)}>
-                        <Ionicons name="checkmark-done" size={13} color="#fff"/>
-                        <Text style={styles.accionTexto}>Finalizar</Text>
+                        <Ionicons name="checkmark-done" size={13} color="#fff"/><Text style={styles.accionTexto}>Finalizar</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -403,6 +354,7 @@ export default function AdminScreen() {
           </View>
         )}
 
+        {/* ───────────── IMPORTAR ───────────── */}
         {tab==='importar' && (
           <View style={{padding:16}}>
             <View style={styles.seccionCard}>
@@ -416,7 +368,6 @@ export default function AdminScreen() {
                 ))}
               </ScrollView>
             </View>
-
             <View style={styles.seccionCard}>
               <Text style={styles.seccionTitulo}>🔢 Liga y temporada</Text>
               <View style={styles.rowInputs}>
@@ -424,7 +375,6 @@ export default function AdminScreen() {
                 <View style={{flex:1}}><Text style={styles.label}>Temporada</Text><TextInput style={styles.input} value={temporada} onChangeText={setTemporada} keyboardType="number-pad" placeholderTextColor="#555577" maxLength={4}/></View>
               </View>
             </View>
-
             <View style={styles.seccionCard}>
               <Text style={styles.seccionTitulo}>📅 Buscar por</Text>
               <View style={styles.modoRow}>
@@ -441,7 +391,6 @@ export default function AdminScreen() {
                 {loadingFix?<ActivityIndicator color="#fff" size="small"/>:<><Ionicons name="search" size={16} color="#fff"/><Text style={styles.btnBuscarTexto}>Buscar partidos</Text></>}
               </TouchableOpacity>
             </View>
-
             {fixtures.length>0&&(
               <View style={styles.seccionCard}>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
@@ -467,14 +416,13 @@ export default function AdminScreen() {
                 })}
               </View>
             )}
-
             {seleccionados.size>0&&(
               <View style={styles.seccionCard}>
                 <Text style={styles.seccionTitulo}>📦 Asignar a jornada</Text>
                 <Text style={styles.label}>Selecciona la jornada destino</Text>
                 {jornadas.filter(j=>j.estado==='abierta').length===0
-                  ? <Text style={{color:C.red,fontSize:13,marginBottom:8}}>⚠️ No hay jornadas abiertas. Crea una primero en la pestaña Jornadas.</Text>
-                  : jornadas.filter(j=>j.estado==='abierta').map(j=>(
+                  ?<Text style={{color:C.red,fontSize:13,marginBottom:8}}>⚠️ No hay jornadas abiertas. Crea una primero en la pestaña Jornadas.</Text>
+                  :jornadas.filter(j=>j.estado==='abierta').map(j=>(
                     <TouchableOpacity key={j.id} style={[styles.jornadaOpcion,jornadaDestino===j.id&&styles.jornadaOpcionActiva]} onPress={()=>setJornadaDestino(j.id)}>
                       <Text style={[styles.jornadaOpcionTexto,jornadaDestino===j.id&&{color:C.accent}]}>{j.nombre}</Text>
                       {jornadaDestino===j.id&&<Ionicons name="checkmark-circle" size={18} color={C.accent}/>}
@@ -489,32 +437,31 @@ export default function AdminScreen() {
           </View>
         )}
 
+        {/* ───────────── QUINIELAS ───────────── */}
         {tab==='quinielas' && (
           <View style={{padding:16}}>
             {quinielas.length===0
-              ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas.</Text></View>
-              : quinielas.map(q=>{
-                const j = jornadas.find(jj=>jj.id===q.jornada_id);
-                return (
+              ?<View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas.</Text></View>
+              :quinielas.map(q=>{
+                const j=jornadas.find(jj=>jj.id===q.jornada_id);
+                return(
                   <View key={q.id} style={styles.card}>
                     <View style={styles.cardRow}>
                       <View style={{flex:1}}>
-                        <Text style={styles.cardUser}>{(q.usuarios as any)?.username ? `@${(q.usuarios as any).username}` : (q.usuarios as any)?.nombre || 'Usuario'}</Text>
-                        <Text style={styles.cardJornada}>{j?.nombre || 'Jornada desconocida'}</Text>
-                        {q.codigo && <Text style={styles.cardCodigo}>🎫 {q.codigo}</Text>}
-                        <Text style={[styles.cardEstado, q.estado_pago==='pagado' ? styles.estadoPagado : styles.estadoPendiente]}>
-                          {q.estado_pago==='pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                        <Text style={styles.cardUser}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
+                        <Text style={styles.cardJornada}>{j?.nombre||'Jornada desconocida'}</Text>
+                        {q.codigo&&<Text style={styles.cardCodigo}>🎫 {q.codigo}</Text>}
+                        <Text style={[styles.cardEstado,q.estado_pago==='pagado'?styles.estadoPagado:styles.estadoPendiente]}>
+                          {q.estado_pago==='pagado'?'✅ Pagado':'⏳ Pendiente'}
                         </Text>
                       </View>
-                      {q.estado_pago !== 'pagado' &&
-                        <TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
-                          <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
-                        </TouchableOpacity>
-                      }
-                      {q.estado_pago === 'pagado' &&
-                        <View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}>
-                          <Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text>
-                        </View>
+                      {q.estado_pago!=='pagado'
+                        ?<TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
+                           <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
+                         </TouchableOpacity>
+                        :<View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}>
+                           <Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text>
+                         </View>
                       }
                     </View>
                   </View>
@@ -523,8 +470,120 @@ export default function AdminScreen() {
             }
           </View>
         )}
+
+        {/* ───────────── PAGOS ───────────── */}
+        {tab==='pagos' && (
+          <View style={{padding:16}}>
+
+            {/* Resumen global */}
+            <View style={styles.seccionCard}>
+              <Text style={styles.seccionTitulo}>📊 Resumen global</Text>
+              <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:4}}>
+                <Text style={styles.resumenLabel}>Total quinielas</Text>
+                <Text style={styles.resumenVal}>{quinielas.length}</Text>
+              </View>
+              <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:4}}>
+                <Text style={styles.resumenLabel}>✅ Pagadas</Text>
+                <Text style={[styles.resumenVal,{color:C.green}]}>{pagados}</Text>
+              </View>
+              <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:4}}>
+                <Text style={styles.resumenLabel}>⏳ Pendientes</Text>
+                <Text style={[styles.resumenVal,{color:C.orange}]}>{pendientes}</Text>
+              </View>
+              <View style={[styles.separador,{marginVertical:10}]}/>
+              <View style={{flexDirection:'row',justifyContent:'space-between'}}>
+                <Text style={[styles.resumenLabel,{fontWeight:'700',color:C.text}]}>💵 Total recaudado</Text>
+                <Text style={[styles.resumenVal,{color:C.gold,fontSize:18,fontWeight:'800'}]}>${recaudacionTotal.toFixed(2)}</Text>
+              </View>
+            </View>
+
+            {/* Por jornada */}
+            {jornadas.map(j=>{
+              const qJ         = quinielas.filter(q=>q.jornada_id===j.id);
+              const pagadasJ   = qJ.filter(q=>q.estado_pago==='pagado');
+              const pendientesJ= qJ.filter(q=>q.estado_pago!=='pagado');
+              const precio     = j.precio||0;
+              const recaudadoJ = precio * pagadasJ.length;
+              const isOpen     = jornadaPagoSel===j.id;
+              return(
+                <View key={j.id} style={styles.pagoJornadaCard}>
+                  {/* Cabecera jornada */}
+                  <TouchableOpacity style={styles.pagoJornadaHeader} onPress={()=>setJornadaPagoSel(isOpen?null:j.id)} activeOpacity={0.8}>
+                    <View style={{flex:1}}>
+                      <Text style={styles.jornadaNombre}>{j.nombre}</Text>
+                      <Text style={styles.jornadaInfo}>
+                        {pagadasJ.length} pagadas · {pendientesJ.length} pendientes
+                        {precio>0?` · $${recaudadoJ.toFixed(2)} recaudados`:''}
+                      </Text>
+                    </View>
+                    <View style={{alignItems:'flex-end',gap:4}}>
+                      {precio>0
+                        ?<View style={styles.precioBadge}><Text style={styles.precioTexto}>${precio}/c</Text></View>
+                        :<View style={[styles.precioBadge,{borderColor:C.orange}]}><Text style={[styles.precioTexto,{color:C.orange}]}>Sin precio</Text></View>
+                      }
+                      <Ionicons name={isOpen?'chevron-up':'chevron-down'} size={16} color={C.textSub}/>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Botón configurar precio */}
+                  <TouchableOpacity style={styles.btnConfPrecio} onPress={()=>{setJornadaPrecioSel(j);setPrecioInput(precio>0?String(precio):'');setModalPrecio(true);}} activeOpacity={0.8}>
+                    <Ionicons name="pricetag-outline" size={13} color={C.accent}/>
+                    <Text style={styles.btnConfPrecioTexto}>{precio>0?'Cambiar precio':'Configurar precio'}</Text>
+                  </TouchableOpacity>
+
+                  {/* Lista de pagos expandible */}
+                  {isOpen&&(
+                    <View style={{marginTop:8}}>
+                      <View style={styles.separador}/>
+                      {qJ.length===0&&<Text style={[styles.emptyText,{marginTop:10}]}>Sin quinielas en esta jornada</Text>}
+
+                      {/* Pendientes primero */}
+                      {pendientesJ.length>0&&(
+                        <View style={{marginTop:8}}>
+                          <Text style={[styles.grupoLabel,{color:C.orange}]}>⏳ Pendientes ({pendientesJ.length})</Text>
+                          {pendientesJ.map(q=>(
+                            <View key={q.id} style={styles.pagoRow}>
+                              <View style={{flex:1}}>
+                                <Text style={styles.pagoUser}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
+                                {q.codigo&&<Text style={styles.pagoCodigo}>🎫 {q.codigo}</Text>}
+                              </View>
+                              <TouchableOpacity style={styles.btnPagarChico} onPress={()=>marcarPagado(q.id)}>
+                                <Ionicons name="checkmark" size={14} color="#fff"/>
+                                <Text style={styles.btnPagarChicoTexto}>Pagado</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Pagadas */}
+                      {pagadasJ.length>0&&(
+                        <View style={{marginTop:8}}>
+                          <Text style={[styles.grupoLabel,{color:C.green}]}>✅ Pagadas ({pagadasJ.length}){precio>0?` · $${recaudadoJ.toFixed(2)}`:''}</Text>
+                          {pagadasJ.map(q=>(
+                            <View key={q.id} style={[styles.pagoRow,{opacity:0.8}]}>
+                              <View style={{flex:1}}>
+                                <Text style={styles.pagoUser}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
+                                {q.codigo&&<Text style={styles.pagoCodigo}>🎫 {q.codigo}</Text>}
+                              </View>
+                              <TouchableOpacity style={[styles.btnPagarChico,{backgroundColor:'rgba(255,159,67,0.15)',borderColor:C.orange,borderWidth:1}]} onPress={()=>marcarPendiente(q.id)}>
+                                <Text style={[styles.btnPagarChicoTexto,{color:C.orange}]}>Revertir</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
       </ScrollView>
 
+      {/* Modal nueva jornada */}
       <Modal visible={modalNueva} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
           <View style={styles.modalOverlay}>
@@ -543,6 +602,7 @@ export default function AdminScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Modal resultado manual */}
       <Modal visible={modalResultado} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -566,6 +626,38 @@ export default function AdminScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal configurar precio */}
+      <Modal visible={modalPrecio} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitulo}>💲 Precio de quiniela</Text>
+              <Text style={styles.modalSubtitulo}>{jornadaPrecioSel?.nombre}</Text>
+              <Text style={styles.label}>Precio por quiniela (MXN)</Text>
+              <TextInput
+                style={styles.input}
+                value={precioInput}
+                onChangeText={setPrecioInput}
+                keyboardType="decimal-pad"
+                placeholder="Ej: 50"
+                placeholderTextColor="#555577"
+                autoFocus
+              />
+              <Text style={{color:C.textSub,fontSize:11,marginBottom:12}}>
+                Este precio se usa para calcular la recaudación. No afecta el flujo de pago existente.
+              </Text>
+              <View style={styles.modalBtns}>
+                <TouchableOpacity style={styles.btnCancelar} onPress={()=>setModalPrecio(false)}><Text style={styles.btnCancelarTexto}>Cancelar</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.btnGuardar,savingPrecio&&{opacity:0.6}]} onPress={guardarPrecio} disabled={savingPrecio}>
+                  {savingPrecio?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }
@@ -576,8 +668,10 @@ const styles = StyleSheet.create({
   backBtn:{padding:6,borderRadius:10,backgroundColor:C.card}, headerTitle:{color:C.text,fontSize:18,fontWeight:'bold'},
   statsRow:{flexDirection:'row',backgroundColor:C.card,marginHorizontal:16,borderRadius:14,padding:14,marginBottom:8,borderWidth:1,borderColor:C.cardBorder},
   stat:{flex:1,alignItems:'center'}, statNum:{color:C.accent,fontSize:22,fontWeight:'bold'}, statLabel:{color:C.textSub,fontSize:11,marginTop:2},
-  tabs:{flexDirection:'row',marginHorizontal:16,marginBottom:8,backgroundColor:C.card,borderRadius:12,padding:4,borderWidth:1,borderColor:C.cardBorder},
-  tabBtn:{flex:1,padding:10,alignItems:'center',borderRadius:10}, tabActivo:{backgroundColor:C.accentDim},
+  tabsScroll:{maxHeight:52,marginHorizontal:16,marginBottom:8},
+  tabsContent:{gap:6,alignItems:'center',paddingVertical:4},
+  tabBtn:{paddingHorizontal:14,paddingVertical:9,alignItems:'center',borderRadius:10,backgroundColor:C.card,borderWidth:1,borderColor:C.cardBorder},
+  tabActivo:{backgroundColor:C.accentDim,borderColor:C.accent},
   tabTexto:{fontSize:12,fontWeight:'600',color:C.textSub}, tabTextoActivo:{color:C.accent},
   btnNueva:{flexDirection:'row',alignItems:'center',gap:8,borderWidth:1.5,borderColor:C.accent,borderStyle:'dashed',padding:14,borderRadius:12,justifyContent:'center',marginBottom:12},
   btnNuevaTexto:{color:C.accent,fontWeight:'700',fontSize:14},
@@ -630,6 +724,20 @@ const styles = StyleSheet.create({
   estadoPagado:{color:C.green}, estadoPendiente:{color:C.orange},
   actionBtn:{paddingHorizontal:12,paddingVertical:7,borderRadius:8,alignItems:'center'},
   actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
+  // Pagos
+  resumenLabel:{color:C.textSub,fontSize:13}, resumenVal:{color:C.text,fontSize:13,fontWeight:'700'},
+  separador:{height:1,backgroundColor:C.cardBorder},
+  pagoJornadaCard:{backgroundColor:C.card,borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.cardBorder},
+  pagoJornadaHeader:{flexDirection:'row',alignItems:'flex-start',marginBottom:8},
+  precioBadge:{borderWidth:1.5,borderColor:C.accent,borderRadius:8,paddingHorizontal:8,paddingVertical:3},
+  precioTexto:{color:C.accent,fontSize:10,fontWeight:'800'},
+  btnConfPrecio:{flexDirection:'row',alignItems:'center',gap:6,padding:8,borderRadius:8,borderWidth:1,borderColor:C.accent,alignSelf:'flex-start',backgroundColor:C.accentDim,marginBottom:4},
+  btnConfPrecioTexto:{color:C.accent,fontSize:12,fontWeight:'700'},
+  grupoLabel:{fontSize:12,fontWeight:'700',marginBottom:6},
+  pagoRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderTopWidth:1,borderTopColor:C.cardBorder},
+  pagoUser:{color:C.text,fontSize:13,fontWeight:'600'}, pagoCodigo:{color:C.textSub,fontSize:11,marginTop:1},
+  btnPagarChico:{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:C.green,paddingHorizontal:10,paddingVertical:6,borderRadius:8},
+  btnPagarChicoTexto:{color:'#fff',fontSize:11,fontWeight:'700'},
   modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
   modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,paddingBottom:34,borderTopWidth:1,borderColor:C.cardBorder},
   modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4}, modalSubtitulo:{fontSize:13,color:C.textSub,marginBottom:16},
