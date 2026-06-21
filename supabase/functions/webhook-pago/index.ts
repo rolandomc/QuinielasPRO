@@ -1,11 +1,7 @@
-// @ts-ignore
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-// @ts-ignore
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// No requiere JWT - Mercado Pago llama sin autenticacion de Supabase
 serve(async (req: Request) => {
-  // Cors y verificacion GET
   if (req.method === 'GET') {
     return new Response('OK', { status: 200 });
   }
@@ -24,7 +20,6 @@ serve(async (req: Request) => {
 
     const paymentId = body.data?.id;
     if (!paymentId || paymentId === '123456') {
-      // Es una simulacion de prueba de MP, responder OK
       return new Response('OK - test', { status: 200 });
     }
 
@@ -76,4 +71,4 @@ serve(async (req: Request) => {
     console.error('Error:', e);
     return new Response('Error interno', { status: 500 });
   }
-}, { verify: false });
+});
