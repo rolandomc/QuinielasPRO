@@ -39,6 +39,7 @@ export default function AdminScreen() {
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading]     = useState(true);
   const [syncing, setSyncing]     = useState(false);
+  const [borrando, setBorrando]   = useState<string|null>(null);
 
   const [modalNueva, setModalNueva] = useState(false);
   const [nombreJornada, setNombreJornada] = useState('');
@@ -118,25 +119,56 @@ export default function AdminScreen() {
     );
   };
 
-  // ✨ NUEVA: borrar jornada y sus partidos/quinielas
   const borrarJornada = (j: Jornada) => {
     Alert.alert(
       '⚠️ Borrar jornada',
       `¿Eliminar "${j.nombre}" permanentemente?\n\nSe borrarán todos sus partidos, quinielas y predicciones. Esta acción NO se puede deshacer.`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Borrar', style: 'destructive', onPress: async () => {
-          // Borrar en cascada: predicciones → quinielas → partidos → jornada
-          const psIds = partidos.filter(p => p.jornada_id === j.id).map(p => p.id);
-          if (psIds.length > 0) {
-            await supabase.from('predicciones').delete().in('partido_id', psIds);
-          }
-          await supabase.from('quinielas').delete().eq('jornada_id', j.id);
-          await supabase.from('partidos').delete().eq('jornada_id', j.id);
-          await supabase.from('jornadas').delete().eq('id', j.id);
-          cargarDatos();
-          Alert.alert('🗑️ Jornada eliminada');
-        }},
+        {
+          text: 'Borrar', style: 'destructive',
+          onPress: async () => {
+            setBorrando(j.id);
+            try {
+              // 1. Obtener IDs de partidos directamente desde la DB (no del estado local)
+              const { data: psDB, error: psErr } = await supabase
+                .from('partidos').select('id').eq('jornada_id', j.id);
+              if (psErr) throw new Error('Error leyendo partidos: ' + psErr.message);
+
+              const psIds = (psDB || []).map((p: any) => p.id);
+
+              // 2. Borrar predicciones de esos partidos
+              if (psIds.length > 0) {
+                const { error: predErr } = await supabase
+                  .from('predicciones').delete().in('partido_id', psIds);
+                if (predErr) throw new Error('Error borrando predicciones: ' + predErr.message);
+              }
+
+              // 3. Borrar quinielas de esta jornada
+              const { error: qErr } = await supabase
+                .from('quinielas').delete().eq('jornada_id', j.id);
+              if (qErr) throw new Error('Error borrando quinielas: ' + qErr.message);
+
+              // 4. Borrar partidos de esta jornada
+              const { error: pErr } = await supabase
+                .from('partidos').delete().eq('jornada_id', j.id);
+              if (pErr) throw new Error('Error borrando partidos: ' + pErr.message);
+
+              // 5. Borrar la jornada
+              const { error: jErr } = await supabase
+                .from('jornadas').delete().eq('id', j.id);
+              if (jErr) throw new Error('Error borrando jornada: ' + jErr.message);
+
+              await cargarDatos();
+              Alert.alert('🗑️ Jornada eliminada', `"${j.nombre}" fue eliminada correctamente.`);
+            } catch (e: any) {
+              Alert.alert('❌ Error al borrar', e.message);
+              await cargarDatos(); // recargar igual para mantener UI sincronizada
+            } finally {
+              setBorrando(null);
+            }
+          },
+        },
       ]
     );
   };
@@ -300,6 +332,7 @@ export default function AdminScreen() {
               const conRes = pJ.filter(p => p.resultado_final).length;
               const isOpen = j.estado === 'abierta';
               const isCerrada = j.estado === 'cerrada';
+              const esBorrando = borrando === j.id;
               return (
                 <View key={j.id} style={styles.jornadaCard}>
                   <View style={styles.jornadaHeader}>
@@ -311,9 +344,16 @@ export default function AdminScreen() {
                       <View style={[styles.estadoBadge,{borderColor:estadoColor(j.estado)}]}>
                         <Text style={[styles.estadoTexto,{color:estadoColor(j.estado)}]}>{j.estado.toUpperCase()}</Text>
                       </View>
-                      {/* Botón borrar */}
-                      <TouchableOpacity onPress={()=>borrarJornada(j)} style={styles.btnTrash}>
-                        <Ionicons name="trash-outline" size={16} color={C.red}/>
+                      {/* Botón borrar con spinner si está borrando */}
+                      <TouchableOpacity
+                        onPress={() => borrarJornada(j)}
+                        style={styles.btnTrash}
+                        disabled={esBorrando}
+                      >
+                        {esBorrando
+                          ? <ActivityIndicator size="small" color={C.red}/>
+                          : <Ionicons name="trash-outline" size={16} color={C.red}/>
+                        }
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -544,7 +584,7 @@ const styles = StyleSheet.create({
   jornadaHeader:{flexDirection:'row',alignItems:'flex-start',marginBottom:12},
   jornadaNombre:{color:C.text,fontWeight:'bold',fontSize:15}, jornadaInfo:{color:C.textSub,fontSize:11,marginTop:2},
   estadoBadge:{borderWidth:1.5,borderRadius:8,paddingHorizontal:8,paddingVertical:3}, estadoTexto:{fontSize:10,fontWeight:'800'},
-  btnTrash:{padding:6,borderRadius:8,borderWidth:1,borderColor:'rgba(255,107,107,0.3)',backgroundColor:'rgba(255,107,107,0.07)'},
+  btnTrash:{padding:6,borderRadius:8,borderWidth:1,borderColor:'rgba(255,107,107,0.3)',backgroundColor:'rgba(255,107,107,0.07)',minWidth:28,alignItems:'center'},
   partidoRow:{flexDirection:'row',alignItems:'center',paddingVertical:8,borderTopWidth:1,borderTopColor:C.cardBorder},
   partidoTexto:{color:C.text,fontSize:13,fontWeight:'600'}, partidoFecha:{color:C.textSub,fontSize:11,marginTop:1},
   resBadge:{backgroundColor:C.accentDim,borderRadius:6,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:C.accent},
