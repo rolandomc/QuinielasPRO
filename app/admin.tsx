@@ -22,6 +22,7 @@ type Quiniela = {
   id: string;
   jornada: number;
   estado_pago: string;
+  usuario_id: string;
   usuarios: { nombre: string } | null;
 };
 
@@ -55,10 +56,15 @@ export default function AdminScreen() {
 
   const cargarDatos = async () => {
     setLoading(true);
-    const [{ data: p }, { data: q }] = await Promise.all([
+    const [{ data: p, error: ep }, { data: q, error: eq }] = await Promise.all([
       supabase.from('partidos').select('*').order('jornada').order('fecha'),
-      supabase.from('quinielas').select('id, jornada, estado_pago, usuarios(nombre)').order('jornada', { ascending: false }),
+      supabase
+        .from('quinielas')
+        .select('id, jornada, estado_pago, usuario_id, usuarios(nombre)')
+        .order('jornada', { ascending: false }),
     ]);
+    if (ep) console.error('Error partidos:', ep.message);
+    if (eq) console.error('Error quinielas:', eq.message);
     if (p) setPartidos(p);
     if (q) setQuinielas(q as any);
     setLoading(false);
@@ -92,70 +98,69 @@ export default function AdminScreen() {
     if (!resultadoInput || !partidoSeleccionado) return;
     setSaving(true);
 
-    // 1. Guardar resultado en el partido y cerrarlo
     const { error } = await supabase
       .from('partidos')
       .update({ resultado_final: resultadoInput, cerrado: true })
       .eq('id', partidoSeleccionado.id);
 
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error guardando partido', error.message);
       setSaving(false);
       return;
     }
 
-    // 2. Recalcular aciertos para TODOS los usuarios de esa jornada
     await recalcularAciertos(partidoSeleccionado.jornada);
 
     setSaving(false);
     setModalResultado(false);
     cargarDatos();
-    Alert.alert('✅ Listo', 'Resultado guardado y aciertos recalculados.');
+    Alert.alert('\u2705 Listo', 'Resultado guardado y aciertos recalculados.');
   };
 
   const recalcularAciertos = async (jornadaNum: number) => {
-    // 1. Todos los partidos de la jornada (con o sin resultado)
-    const { data: todosPartidos } = await supabase
+    // 1. Partidos con resultado de la jornada
+    const { data: partidosJornada, error: e1 } = await supabase
       .from('partidos')
       .select('id, resultado_final')
-      .eq('jornada', jornadaNum);
+      .eq('jornada', jornadaNum)
+      .not('resultado_final', 'is', null);
 
-    if (!todosPartidos || todosPartidos.length === 0) return;
+    if (e1) { console.error('Error partidos jornada:', e1.message); return; }
+    if (!partidosJornada || partidosJornada.length === 0) return;
 
-    // Solo los que ya tienen resultado para comparar
-    const conResultado = todosPartidos.filter(p => p.resultado_final !== null);
-    const idsConResultado = conResultado.map(p => p.id);
+    const idsPartidos = partidosJornada.map(p => p.id);
 
-    if (idsConResultado.length === 0) return;
-
-    // 2. Todas las quinielas de esa jornada
-    const { data: quinielasJornada } = await supabase
+    // 2. Quinielas de la jornada
+    const { data: quinielasJornada, error: e2 } = await supabase
       .from('quinielas')
       .select('id, usuario_id')
       .eq('jornada', jornadaNum);
 
+    if (e2) { console.error('Error quinielas jornada:', e2.message); return; }
     if (!quinielasJornada || quinielasJornada.length === 0) return;
 
-    // 3. Para cada quiniela calcular aciertos
-    for (const quiniela of quinielasJornada) {
-      const { data: preds } = await supabase
+    // 3. Calcular aciertos por quiniela
+    for (const q of quinielasJornada) {
+      const { data: preds, error: e3 } = await supabase
         .from('predicciones')
         .select('partido_id, resultado')
-        .eq('usuario_id', quiniela.usuario_id)
-        .in('partido_id', idsConResultado);
+        .eq('usuario_id', q.usuario_id)
+        .in('partido_id', idsPartidos);
+
+      if (e3) { console.error('Error predicciones:', e3.message); continue; }
 
       let aciertos = 0;
       for (const pred of (preds || [])) {
-        const partido = conResultado.find(p => p.id === pred.partido_id);
-        if (partido && partido.resultado_final === pred.resultado) {
-          aciertos++;
-        }
+        const partido = partidosJornada.find(p => p.id === pred.partido_id);
+        if (partido?.resultado_final === pred.resultado) aciertos++;
       }
 
-      await supabase
+      const { error: e4 } = await supabase
         .from('quinielas')
         .update({ aciertos })
-        .eq('id', quiniela.id);
+        .eq('id', q.id);
+
+      if (e4) console.error('Error update aciertos:', e4.message);
     }
   };
 
@@ -172,8 +177,12 @@ export default function AdminScreen() {
   };
 
   const marcarPagado = async (quinielaId: string) => {
-    await supabase.from('quinielas').update({ estado_pago: 'pagado' }).eq('id', quinielaId);
-    cargarDatos();
+    const { error } = await supabase
+      .from('quinielas')
+      .update({ estado_pago: 'pagado' })
+      .eq('id', quinielaId);
+    if (error) Alert.alert('Error', error.message);
+    else cargarDatos();
   };
 
   if (loading) return <ActivityIndicator style={{ flex: 1 }} color="#009ee3" />;
@@ -203,7 +212,7 @@ export default function AdminScreen() {
           <Text style={[styles.tabTexto, tab === 'partidos' && styles.tabTextoActivo]}>⚽ Partidos</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, tab === 'quinielas' && styles.tabActivo]} onPress={() => setTab('quinielas')}>
-          <Text style={[styles.tabTexto, tab === 'quinielas' && styles.tabTextoActivo]}>📋 Quinielas</Text>
+          <Text style={[styles.tabTexto, tab === 'quinielas' && styles.tabTextoActivo]}>📋 Quinielas ({quinielas.length})</Text>
         </TouchableOpacity>
       </View>
 
@@ -243,23 +252,31 @@ export default function AdminScreen() {
             ))}
           </>
         ) : (
-          quinielas.map((q) => (
-            <View key={q.id} style={styles.card}>
-              <View style={styles.cardRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardPartido}>{(q.usuarios as any)?.nombre || 'Usuario'}</Text>
-                  <Text style={styles.cardJornada}>Jornada {q.jornada}</Text>
-                </View>
-                {q.estado_pago === 'pagado' ? (
-                  <View style={[styles.actionBtn, { backgroundColor: '#4caf50' }]}><Text style={styles.actionBtnTexto}>✅ Pagado</Text></View>
-                ) : (
-                  <TouchableOpacity onPress={() => marcarPagado(q.id)} style={[styles.actionBtn, { backgroundColor: '#009ee3' }]}>
-                    <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+          quinielas.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyText}>No hay quinielas registradas aún.</Text>
             </View>
-          ))
+          ) : (
+            quinielas.map((q) => (
+              <View key={q.id} style={styles.card}>
+                <View style={styles.cardRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardPartido}>{(q.usuarios as any)?.nombre || 'Usuario'}</Text>
+                    <Text style={styles.cardJornada}>Jornada {q.jornada}</Text>
+                  </View>
+                  {q.estado_pago === 'pagado' ? (
+                    <View style={[styles.actionBtn, { backgroundColor: '#4caf50' }]}>
+                      <Text style={styles.actionBtnTexto}>✅ Pagado</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity onPress={() => marcarPagado(q.id)} style={[styles.actionBtn, { backgroundColor: '#009ee3' }]}>
+                      <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))
+          )
         )}
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -352,6 +369,8 @@ const styles = StyleSheet.create({
   btnCerrarPartido: { backgroundColor: '#ff9800' },
   btnAbrir: { backgroundColor: '#4caf50' },
   btnEliminar: { backgroundColor: '#e53935' },
+  emptyBox: { margin: 20, padding: 20, backgroundColor: '#fff', borderRadius: 12, alignItems: 'center' },
+  emptyText: { color: '#888', fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24 },
   modalTitulo: { fontSize: 18, fontWeight: 'bold', color: '#1a1a2e', marginBottom: 4 },

@@ -10,7 +10,7 @@ type Quiniela = {
   jornada: number;
   estado_pago: string;
   aciertos: number;
-  created_at: string;
+  creado_en: string;
 };
 
 export default function PerfilScreen() {
@@ -20,18 +20,19 @@ export default function PerfilScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchQuinielas = async () => {
-      if (!user) return;
-      const { data } = await supabase
-        .from('quinielas')
-        .select('id, jornada, estado_pago, aciertos, created_at')
-        .eq('usuario_id', user.id)
-        .order('created_at', { ascending: false });
-      if (data) setQuinielas(data);
-      setLoading(false);
-    };
-    fetchQuinielas();
+    if (user) fetchQuinielas();
   }, [user]);
+
+  const fetchQuinielas = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('quinielas')
+      .select('id, jornada, estado_pago, aciertos, creado_en')
+      .eq('usuario_id', user!.id)
+      .order('creado_en', { ascending: false });
+    if (data) setQuinielas(data);
+    setLoading(false);
+  };
 
   const cerrarSesion = async () => {
     await signOut();
@@ -40,9 +41,9 @@ export default function PerfilScreen() {
 
   const estadoBadge = (estado: string) => {
     switch (estado) {
-      case 'pagado': return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
+      case 'pagado':   return { label: '\u2705 Pagado \u2014 Participando', bg: '#1b5e20' };
       case 'pendiente': return { label: '\u23F3 Pago pendiente', bg: '#e65100' };
-      default: return { label: '\u274C Sin pago', bg: '#b71c1c' };
+      default:          return { label: '\u274C Sin pago', bg: '#b71c1c' };
     }
   };
 
