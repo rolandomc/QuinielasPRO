@@ -8,7 +8,6 @@
     "scheme": "quinielapro",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "backgroundColor": "#0d0d1a",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -31,8 +30,8 @@
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png",
-      "backgroundColor": "#0d0d1a",
-      "themeColor": "#0d0d1a",
+      "backgroundColor": "#1a1a2e",
+      "themeColor": "#1a1a2e",
       "meta": {
         "viewport": "width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover",
         "apple-mobile-web-app-capable": "yes",
@@ -48,7 +47,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0d0d1a"
+          "backgroundColor": "#1a1a2e"
         }
       ],
       "expo-secure-store"

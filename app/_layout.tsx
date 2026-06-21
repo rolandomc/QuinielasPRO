@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 
 function RootLayoutNav() {
@@ -13,19 +12,19 @@ function RootLayoutNav() {
     if (loading) return;
     const inTabs = segments[0] === '(tabs)';
     const inPago = segments[0] === 'pago';
+
     if (!session && inTabs) {
       router.replace('/login');
     } else if (session && !inTabs && !inPago) {
       router.replace('/(tabs)/quiniela');
     }
-  }, [session, loading, segments, router]);
+  }, [session, loading]);
 
   return (
-    <View style={styles.root}>
-      <StatusBar style="light" backgroundColor="#0d0d1a" />
+    <>
+      <StatusBar style="light" />
       <Stack
         screenOptions={{
-          contentStyle: { backgroundColor: '#0d0d1a' },
           headerStyle: { backgroundColor: '#1a1a2e' },
           headerTintColor: '#fff',
           headerTitleStyle: { fontWeight: 'bold' },
@@ -38,7 +37,7 @@ function RootLayoutNav() {
         <Stack.Screen name="pago/exito" options={{ title: 'Pago Exitoso', headerBackVisible: false }} />
         <Stack.Screen name="pago/error" options={{ title: 'Pago Fallido', headerBackVisible: false }} />
       </Stack>
-    </View>
+    </>
   );
 }
 
@@ -49,10 +48,3 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#0d0d1a',
-  },
-});
