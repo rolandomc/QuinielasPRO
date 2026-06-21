@@ -38,28 +38,39 @@ export default function LoginScreen() {
   };
 
   const verificarToken = async () => {
-    // Permite pegar la URL completa o solo el token
     let tokenLimpio = token.trim();
+    // Extraer token de la URL si se pega el enlace completo
     const match = tokenLimpio.match(/[?&]token=([a-zA-Z0-9]+)/);
     if (match) {
       tokenLimpio = match[1];
     }
     if (!tokenLimpio) {
-      Alert.alert('Token vacio', 'Pega el enlace completo o solo el token.');
+      Alert.alert('Token vacio', 'Pega el enlace completo.');
       return;
     }
+
+    console.log('TOKEN A VERIFICAR:', tokenLimpio);
+    console.log('EMAIL:', email.trim().toLowerCase());
+
     setLoading(true);
-    const { error } = await supabase.auth.verifyOtp({
+    const { data, error } = await supabase.auth.verifyOtp({
       email: email.trim().toLowerCase(),
       token: tokenLimpio,
-      type: 'magiclink',
+      type: 'email',
     });
     setLoading(false);
+
+    console.log('RESULTADO:', JSON.stringify({ data, error }));
+
     if (error) {
-      Alert.alert('Token invalido', 'El enlace es incorrecto o ya expiro. Solicita uno nuevo.');
+      Alert.alert('Error: ' + error.message, 'Solicita un nuevo enlace.');
       setToken('');
+    } else if (data?.session) {
+      // Sesion creada, AuthContext deberia redirigir
+      console.log('SESION OK:', data.session.user?.email);
+    } else {
+      Alert.alert('Sin sesion', 'No se pudo crear la sesion. Intenta de nuevo.');
     }
-    // Si es correcto, AuthContext detecta la sesion y redirige automaticamente
   };
 
   return (
@@ -118,14 +129,8 @@ export default function LoginScreen() {
               <Text style={styles.enviadoEmoji}>📧</Text>
               <Text style={styles.cardTitulo}>Revisa tu correo</Text>
               <Text style={styles.cardSub}>
-                Abre el correo, copia el enlace completo de "Sign in" y pegalo aqui abajo.
+                Manten presionado "Sign in" en el correo, copia el enlace y pegalo aqui.
               </Text>
-
-              <View style={styles.instruccion}>
-                <Text style={styles.instruccionTexto}>👉 Manten presionado "Sign in" en el correo</Text>
-                <Text style={styles.instruccionTexto}>👉 Selecciona "Copiar enlace"</Text>
-                <Text style={styles.instruccionTexto}>👉 Pega aqui abajo</Text>
-              </View>
 
               <Text style={styles.label}>Pega el enlace aqui</Text>
               <TextInput
@@ -176,8 +181,6 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', padding: 28, borderRadius: 16, width: '100%', maxWidth: 420, elevation: 8 },
   cardTitulo: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', textAlign: 'center' },
   cardSub: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16, marginTop: 6, lineHeight: 20 },
-  instruccion: { backgroundColor: '#f0f8ff', borderRadius: 10, padding: 14, marginBottom: 16 },
-  instruccionTexto: { fontSize: 13, color: '#444', marginBottom: 6, lineHeight: 20 },
   label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 5 },
   input: { borderWidth: 1.5, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 15, color: '#333', backgroundColor: '#fafafa' },
   tokenInput: { fontSize: 12, minHeight: 80, textAlignVertical: 'top' },
