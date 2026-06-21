@@ -373,7 +373,6 @@ export default function AdminScreen(){
 
   const mostrarNav = screen !== 'crear_quiniela';
 
-  // ── SCREEN: CREAR QUINIELA ─────────────────────────────────────────────────
   const renderCrearQuiniela=()=>(
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}>
       <WizardIndicator step={wizardStep}/>
@@ -504,7 +503,6 @@ export default function AdminScreen(){
     </KeyboardAvoidingView>
   );
 
-  // ── SCREEN: DETALLE JORNADA ────────────────────────────────────────────────
   const renderDetalleJornada=()=>{
     if(!jornadaSel)return null;
     const j=jornadas.find(x=>x.id===jornadaSel.id)||jornadaSel;
@@ -626,7 +624,6 @@ export default function AdminScreen(){
     );
   };
 
-  // ── SCREEN: HOME ──────────────────────────────────────────────────────────
   const renderHome=()=>(
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:100}}>
       <View style={styles.statsRow}>
@@ -635,7 +632,6 @@ export default function AdminScreen(){
         <StatChip icon="cash-outline" value={`$${recaudacionTotal.toFixed(0)}`} label="Recaudado" color={C.gold} dim={C.goldDim}/>
         <StatChip icon="time-outline" value={String(pendientesTot)} label="Pendientes" color={C.orange} dim={C.orangeDim}/>
       </View>
-
       {jornadasActivas.length>0&&(
         <>
           <Text style={styles.seccionTitulo}>Jornadas activas</Text>
@@ -667,7 +663,6 @@ export default function AdminScreen(){
           })}
         </>
       )}
-
       {jornadasFin.length>0&&(
         <>
           <Text style={[styles.seccionTitulo,{marginTop:20}]}>Finalizadas</Text>
@@ -686,7 +681,6 @@ export default function AdminScreen(){
           })}
         </>
       )}
-
       {jornadas.length===0&&(
         <View style={styles.emptyCard}>
           <Ionicons name="trophy-outline" size={48} color={C.textMuted}/>
@@ -697,7 +691,6 @@ export default function AdminScreen(){
     </ScrollView>
   );
 
-  // ── SCREEN: QUINIELAS ────────────────────────────────────────────────────
   const renderQuinielas=()=>(
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:100}}>
       {quinPendientes.length>0&&(
@@ -763,7 +756,6 @@ export default function AdminScreen(){
     </ScrollView>
   );
 
-  // ── SCREEN: INGRESOS ──────────────────────────────────────────────────────
   const renderIngresos=()=>(
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:100}}>
       <View style={styles.statsRow}>
@@ -788,7 +780,6 @@ export default function AdminScreen(){
     </ScrollView>
   );
 
-  // ── MODAL RESULTADO ───────────────────────────────────────────────────────
   const renderModalResultado=()=>(
     <Modal visible={modalResultado} transparent animationType="slide" onRequestClose={()=>setModalResultado(false)}>
       <View style={styles.modalOverlay}>
@@ -829,7 +820,6 @@ export default function AdminScreen(){
     </Modal>
   );
 
-  // ── MODAL PRECIO ─────────────────────────────────────────────────────────
   const renderModalPrecio=()=>(
     <Modal visible={modalPrecio} transparent animationType="slide" onRequestClose={()=>setModalPrecio(false)}>
       <View style={styles.modalOverlay}>
@@ -851,7 +841,6 @@ export default function AdminScreen(){
     </Modal>
   );
 
-  // ── MODAL GANADOR ─────────────────────────────────────────────────────────
   const renderModalGanador=()=>(
     <Modal visible={modalGanador} transparent animationType="slide" onRequestClose={()=>setModalGanador(false)}>
       <View style={styles.modalOverlay}>
@@ -905,7 +894,6 @@ export default function AdminScreen(){
     </Modal>
   );
 
-  // ── RENDER PRINCIPAL ──────────────────────────────────────────────────────
   return(
     <View style={[styles.root,{paddingTop:insets.top}]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
@@ -943,10 +931,6 @@ export default function AdminScreen(){
             <View style={styles.navAddBtn}>
               <Ionicons name="add" size={26} color="#fff"/>
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('quinielas')} activeOpacity={0.7}>
-            <Ionicons name="list-outline" size={22} color={screen==='quinielas'?C.accent:C.textMuted}/>
-            <Text style={[styles.navTabLabel,screen==='quinielas'&&{color:C.accent}]}>Quinielas</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('ingresos')} activeOpacity={0.7}>
             <Ionicons name="bar-chart-outline" size={22} color={screen==='ingresos'?C.accent:C.textMuted}/>
