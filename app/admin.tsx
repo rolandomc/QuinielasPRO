@@ -71,7 +71,6 @@ function StatChip({icon,value,label,color,dim}:{icon:string;value:string;label:s
   );
 }
 
-// ── Indicador de pasos del wizard ──────────────────────────────────────────
 function WizardIndicator({step}:{step:WizardStep}){
   const steps=[{n:1,label:'Nombre'},{n:2,label:'Partidos'},{n:3,label:'Precio'}];
   return(
@@ -108,7 +107,6 @@ export default function AdminScreen(){
   const [syncingByJornada,setSyncingByJornada]=useState<Record<string,boolean>>({});
   const [borrando,setBorrando]=useState<string|null>(null);
 
-  // ── Wizard crear quiniela ──────────────────────────────────────────────
   const [wizardStep,setWizardStep]=useState<WizardStep>(1);
   const [wNombre,setWNombre]=useState('');
   const [wPrecio,setWPrecio]=useState('');
@@ -124,19 +122,16 @@ export default function AdminScreen(){
   const [wSel,setWSel]=useState<Set<number>>(new Set());
   const [wCreando,setWCreando]=useState(false);
 
-  // ── Modal resultado ────────────────────────────────────────────────────
   const [modalResultado,setModalResultado]=useState(false);
   const [partidoSel,setPartidoSel]=useState<Partido|null>(null);
   const [resultadoInput,setResultadoInput]=useState<'1'|'X'|'2'|null>(null);
   const [saving,setSaving]=useState(false);
 
-  // ── Modal precio (editar precio de jornada existente) ─────────────────
   const [modalPrecio,setModalPrecio]=useState(false);
   const [jornadaPrecioSel,setJornadaPrecioSel]=useState<Jornada|null>(null);
   const [precioInput,setPrecioInput]=useState('');
   const [savingPrecio,setSavingPrecio]=useState(false);
 
-  // ── Ingresos ──────────────────────────────────────────────────────────
   const [expandedJornada,setExpandedJornada]=useState<string|null>(null);
 
   useEffect(()=>{
@@ -157,7 +152,6 @@ export default function AdminScreen(){
     setLoading(false);
   };
 
-  // ── Wizard helpers ─────────────────────────────────────────────────────
   const resetWizard=()=>{
     setWizardStep(1);setWNombre('');setWPrecio('');setWLigaId('2000');setWTemporada('2026');
     setWModo('jornada');setWRound('1');setWFecha(new Date().toISOString().split('T')[0]);
@@ -181,19 +175,15 @@ export default function AdminScreen(){
     setWLoadingFix(false);
   };
 
-  // Crea jornada + importa partidos + guarda precio — todo en uno
   const wizardCrearQuiniela=async()=>{
     if(!wNombre.trim()){avisar('Falta nombre','Ponle nombre a la quiniela.');return;}
     setWCreando(true);
     try{
-      // 1. Crear jornada
       const {data:jData,error:jErr}=await supabase
         .from('jornadas')
         .insert({nombre:wNombre.trim(),estado:'abierta',precio:wPrecio?parseFloat(wPrecio.replace(',','.')):null})
         .select().single();
       if(jErr||!jData){avisar('Error',jErr?.message||'No se pudo crear la jornada.');setWCreando(false);return;}
-
-      // 2. Importar partidos seleccionados (si hay)
       if(wSel.size>0){
         const inserts=wFixtures.filter(f=>wSel.has(f.fixture.id)).map(f=>({
           local:f.teams.home.name,visitante:f.teams.away.name,fecha:f.fixture.date,
@@ -205,10 +195,8 @@ export default function AdminScreen(){
         const {error:pErr}=await supabase.from('partidos').insert(inserts);
         if(pErr){avisar('Aviso',`Jornada creada pero error al importar partidos: ${pErr.message}`);}
       }
-
       await cargarDatos();
       resetWizard();
-      // Abrir directo el detalle de la jornada recién creada
       setJornadaSel(jData);
       setScreen('jornada_detalle');
       avisar('✅ Quiniela creada',`"${jData.nombre}" lista${wSel.size>0?` con ${wSel.size} partido(s)`:''}${wPrecio?` · $${wPrecio} por quiniela`:''}`);
@@ -216,7 +204,6 @@ export default function AdminScreen(){
     setWCreando(false);
   };
 
-  // ── CRUD existentes ────────────────────────────────────────────────────
   const cerrarJornada=(j:Jornada)=>{
     confirmar('Cerrar jornada',`¿Cerrar "${j.nombre}"? Los usuarios ya no podrán editar.`,async()=>{
       await supabase.from('jornadas').update({estado:'cerrada'}).eq('id',j.id);
@@ -314,18 +301,17 @@ export default function AdminScreen(){
 
   if(loading)return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
 
-  // ── Computed ───────────────────────────────────────────────────────────
-  const pagados         =quinielas.filter(q=>q.estado_pago==='pagado').length;
-  const pendientesTot   =quinielas.filter(q=>q.estado_pago==='pendiente').length;
-  const recaudacionTotal=quinielas.filter(q=>q.estado_pago==='pagado').reduce((s,q)=>s+(q.monto_cobrado??0),0);
-  const jornadasActivas =jornadas.filter(j=>j.estado==='abierta'||j.estado==='cerrada');
-  const jornadasFin     =jornadas.filter(j=>j.estado==='finalizada');
-  const quinPendientes  =quinielas.filter(q=>q.estado_pago==='pendiente');
-  const statusColor     =(s:string)=>s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
-  const estadoColor     =(e:string)=>e==='abierta'?C.green:e==='cerrada'?C.orange:C.textSub;
-  const estadoDim       =(e:string)=>e==='abierta'?C.greenDim:e==='cerrada'?C.orangeDim:'rgba(100,100,130,0.1)';
-  const estadoLabel     =(e:string)=>e==='abierta'?'ABIERTA':e==='cerrada'?'EN CURSO':'FINALIZADA';
-  const datosIngresos   =jornadas.map(j=>{
+  const pagados          = quinielas.filter(q=>q.estado_pago==='pagado').length;
+  const pendientesTot    = quinielas.filter(q=>q.estado_pago==='pendiente').length;
+  const recaudacionTotal = quinielas.filter(q=>q.estado_pago==='pagado').reduce((s,q)=>s+(q.monto_cobrado??0),0);
+  const jornadasActivas  = jornadas.filter(j=>j.estado==='abierta'||j.estado==='cerrada');
+  const jornadasFin      = jornadas.filter(j=>j.estado==='finalizada');
+  const quinPendientes   = quinielas.filter(q=>q.estado_pago==='pendiente');
+  const statusColor      = (s:string)=>s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
+  const estadoColor      = (e:string)=>e==='abierta'?C.green:e==='cerrada'?C.orange:C.textSub;
+  const estadoDim        = (e:string)=>e==='abierta'?C.greenDim:e==='cerrada'?C.orangeDim:'rgba(100,100,130,0.1)';
+  const estadoLabel      = (e:string)=>e==='abierta'?'ABIERTA':e==='cerrada'?'EN CURSO':'FINALIZADA';
+  const datosIngresos    = jornadas.map(j=>{
     const qJ=quinielas.filter(q=>q.jornada_id===j.id);
     const pagadasJ=qJ.filter(q=>q.estado_pago==='pagado');
     const pendientesJ=qJ.filter(q=>q.estado_pago!=='pagado');
@@ -335,40 +321,28 @@ export default function AdminScreen(){
   });
   const maxRecaudado=Math.max(...datosIngresos.map(d=>d.recaudadoJ),1);
 
+  // ── Determina si mostrar el bottom nav (no en wizard) ──────────────────
+  const mostrarNav = screen !== 'crear_quiniela';
+
   // ══════════════════════════════════════════════════════════════════════
-  //  SCREEN: CREAR QUINIELA (wizard 3 pasos)
+  //  SCREEN: CREAR QUINIELA
   // ══════════════════════════════════════════════════════════════════════
   const renderCrearQuiniela=()=>(
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}>
       <WizardIndicator step={wizardStep}/>
-
       <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}} keyboardShouldPersistTaps="handled">
-
-        {/* ── PASO 1: Nombre ── */}
         {wizardStep===1&&(
           <View>
             <Text style={styles.wizardTitulo}>¿Cómo se llama esta quiniela?</Text>
             <Text style={styles.wizardSub}>Elige un nombre descriptivo para que los participantes la identifiquen.</Text>
-            <TextInput
-              style={[styles.inputGrande]}
-              value={wNombre}
-              onChangeText={setWNombre}
-              placeholder="Ej: Jornada 1 · Copa Mundial 2026"
-              placeholderTextColor={C.textMuted}
-              autoFocus
-              maxLength={80}
-            />
+            <TextInput style={[styles.inputGrande]} value={wNombre} onChangeText={setWNombre} placeholder="Ej: Jornada 1 · Copa Mundial 2026" placeholderTextColor={C.textMuted} autoFocus maxLength={80}/>
             <Text style={{color:C.textMuted,fontSize:11,textAlign:'right',marginTop:-4,marginBottom:16}}>{wNombre.length}/80</Text>
           </View>
         )}
-
-        {/* ── PASO 2: Partidos ── */}
         {wizardStep===2&&(
           <View>
             <Text style={styles.wizardTitulo}>Importa los partidos</Text>
             <Text style={styles.wizardSub}>Selecciona los partidos de esta quiniela desde la API. También puedes saltarte este paso y agregarlos después.</Text>
-
-            {/* Ligas rápidas */}
             <Text style={styles.label}>Liga rápida</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:8,marginBottom:12}}>
               {LIGAS.map(l=>(
@@ -378,14 +352,10 @@ export default function AdminScreen(){
                 </TouchableOpacity>
               ))}
             </ScrollView>
-
-            {/* Inputs manuales */}
             <View style={{flexDirection:'row',gap:12,marginBottom:4}}>
               <View style={{flex:1}}><Text style={styles.label}>ID liga</Text><TextInput style={styles.input} value={wLigaId} onChangeText={setWLigaId} keyboardType="number-pad" placeholderTextColor={C.textMuted}/></View>
               <View style={{flex:1}}><Text style={styles.label}>Temporada</Text><TextInput style={styles.input} value={wTemporada} onChangeText={setWTemporada} keyboardType="number-pad" placeholderTextColor={C.textMuted} maxLength={4}/></View>
             </View>
-
-            {/* Modo búsqueda */}
             <Text style={styles.label}>Buscar por</Text>
             <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
               {(['jornada','fecha','semana'] as const).map(m=>(
@@ -397,12 +367,9 @@ export default function AdminScreen(){
             {wModo==='jornada'&&<><Text style={styles.label}>Número de jornada</Text><TextInput style={styles.input} value={wRound} onChangeText={setWRound} keyboardType="number-pad" placeholderTextColor={C.textMuted}/></>}
             {wModo==='fecha'&&<><Text style={styles.label}>Fecha (YYYY-MM-DD)</Text><TextInput style={styles.input} value={wFecha} onChangeText={setWFecha} placeholderTextColor={C.textMuted}/></>}
             {wModo==='semana'&&<><Text style={styles.label}>Desde</Text><TextInput style={styles.input} value={wFechaDesde} onChangeText={setWFechaDesde} placeholderTextColor={C.textMuted}/><Text style={styles.label}>Hasta</Text><TextInput style={styles.input} value={wFechaHasta} onChangeText={setWFechaHasta} placeholderTextColor={C.textMuted}/></>}
-
             <TouchableOpacity style={[styles.btnSecundarioPrimary,wLoadingFix&&{opacity:0.6}]} onPress={wizardBuscarFixtures} disabled={wLoadingFix} activeOpacity={0.8}>
               {wLoadingFix?<ActivityIndicator color={C.accent} size="small"/>:<><Ionicons name="search" size={15} color={C.accent}/><Text style={styles.btnSecundarioPrimaryTexto}>Buscar partidos</Text></>}
             </TouchableOpacity>
-
-            {/* Lista de fixtures */}
             {wFixtures.length>0&&(
               <View style={{marginTop:14}}>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
@@ -430,14 +397,10 @@ export default function AdminScreen(){
             )}
           </View>
         )}
-
-        {/* ── PASO 3: Precio ── */}
         {wizardStep===3&&(
           <View>
             <Text style={styles.wizardTitulo}>¿Cuánto cuesta participar?</Text>
             <Text style={styles.wizardSub}>Define el precio por quiniela. Este monto se usará para registrar cobros y calcular la recaudación total.</Text>
-
-            {/* Resumen de lo configurado */}
             <View style={styles.resumenCard}>
               <View style={styles.resumenRow}>
                 <Ionicons name="trophy-outline" size={16} color={C.accent}/>
@@ -450,23 +413,12 @@ export default function AdminScreen(){
                 <Text style={styles.resumenVal}>{wSel.size>0?`${wSel.size} seleccionados`:'Sin partidos (agregar después)'}</Text>
               </View>
             </View>
-
             <Text style={styles.label}>Precio por quiniela (MXN)</Text>
-            <TextInput
-              style={styles.inputGrande}
-              value={wPrecio}
-              onChangeText={setWPrecio}
-              keyboardType="decimal-pad"
-              placeholder="Ej: 50"
-              placeholderTextColor={C.textMuted}
-              autoFocus
-            />
+            <TextInput style={styles.inputGrande} value={wPrecio} onChangeText={setWPrecio} keyboardType="decimal-pad" placeholder="Ej: 50" placeholderTextColor={C.textMuted} autoFocus/>
             <Text style={{color:C.textMuted,fontSize:11,marginBottom:8,marginTop:-4}}>Deja vacío si aún no defines el precio.</Text>
           </View>
         )}
       </ScrollView>
-
-      {/* Barra de navegación del wizard */}
       <View style={[styles.wizardNavBar,{paddingBottom:insets.bottom+12}]}>
         {wizardStep>1
           ?<TouchableOpacity style={styles.btnWizardBack} onPress={()=>setWizardStep((wizardStep-1) as WizardStep)}>
@@ -552,7 +504,7 @@ export default function AdminScreen(){
             {esBorrando?<ActivityIndicator color={C.red} size="small"/>:<><Ionicons name="trash-outline" size={15} color={C.red}/><Text style={[styles.detalleBtnTexto,{color:C.red}]}>Borrar</Text></>}
           </TouchableOpacity>
         </View>
-        <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}}>
+        <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}}>
           {pJ.length===0&&(
             <View style={styles.emptyCard}>
               <Ionicons name="football-outline" size={36} color={C.textMuted}/>
@@ -587,7 +539,7 @@ export default function AdminScreen(){
   const renderQuinielas=()=>{
     const grouped=jornadas.map(j=>({j,qs:quinielas.filter(q=>q.jornada_id===j.id)})).filter(g=>g.qs.length>0);
     return(
-      <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}}>
+      <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}}>
         {grouped.length===0&&<View style={styles.emptyCard}><Ionicons name="document-outline" size={36} color={C.textMuted}/><Text style={styles.emptyTexto}>No hay quinielas.</Text></View>}
         {grouped.map(({j,qs})=>(
           <View key={j.id} style={styles.grupCard}>
@@ -623,7 +575,7 @@ export default function AdminScreen(){
   const renderIngresos=()=>{
     const potTotal=datosIngresos.reduce((s,d)=>s+d.potencial,0);
     return(
-      <ScrollView contentContainerStyle={{padding:16,paddingBottom:60}}>
+      <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}}>
         <View style={styles.kpiRow}>
           <View style={[styles.kpiCard,{borderColor:C.gold+'50',backgroundColor:C.goldDim}]}><Text style={[styles.kpiVal,{color:C.gold}]}>${recaudacionTotal.toFixed(0)}</Text><Text style={styles.kpiLabel}>Recaudado</Text></View>
           <View style={[styles.kpiCard,{borderColor:C.green+'50',backgroundColor:C.greenDim}]}><Text style={[styles.kpiVal,{color:C.green}]}>{pagados}</Text><Text style={styles.kpiLabel}>Pagados</Text></View>
@@ -682,16 +634,12 @@ export default function AdminScreen(){
   // ══════════════════════════════════════════════════════════════════════
   const renderHome=()=>(
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:100}} showsVerticalScrollIndicator={false}>
-
-      {/* Stats */}
       <View style={styles.statsGrid}>
         <StatChip icon="trophy" value={`$${recaudacionTotal.toFixed(0)}`} label="Recaudado" color={C.gold} dim={C.goldDim}/>
         <StatChip icon="checkmark-circle" value={String(pagados)} label="Pagados" color={C.green} dim={C.greenDim}/>
         <StatChip icon="time" value={String(pendientesTot)} label="Pendientes" color={C.orange} dim={C.orangeDim}/>
         <StatChip icon="layers" value={String(jornadas.length)} label="Jornadas" color={C.accent} dim={C.accentDim}/>
       </View>
-
-      {/* Alerta pagos pendientes */}
       {quinPendientes.length>0&&(
         <TouchableOpacity style={styles.alertaBanner} onPress={()=>setScreen('ingresos')} activeOpacity={0.8}>
           <View style={styles.alertaIconWrap}><Ionicons name="alert-circle" size={20} color={C.orange}/></View>
@@ -699,8 +647,6 @@ export default function AdminScreen(){
           <Ionicons name="chevron-forward" size={16} color={C.orange}/>
         </TouchableOpacity>
       )}
-
-      {/* Jornadas activas */}
       {jornadasActivas.length>0&&(
         <>
           <Text style={styles.sectionTitle}>Quinielas activas</Text>
@@ -733,8 +679,6 @@ export default function AdminScreen(){
           })}
         </>
       )}
-
-      {/* Historial */}
       {jornadasFin.length>0&&(
         <>
           <Text style={[styles.sectionTitle,{marginTop:8}]}>Historial</Text>
@@ -750,7 +694,6 @@ export default function AdminScreen(){
           })}
         </>
       )}
-
       {jornadas.length===0&&(
         <View style={styles.emptyCard}>
           <Ionicons name="calendar-outline" size={40} color={C.textMuted}/>
@@ -763,30 +706,27 @@ export default function AdminScreen(){
   // ══════════════════════════════════════════════════════════════════════
   //  MAIN RENDER
   // ══════════════════════════════════════════════════════════════════════
-  const isHome=screen==='home';
-  const screenTitle:Record<Screen,string>={
-    home:'🛡️ Admin',
-    crear_quiniela:'Nueva quiniela',
-    jornada_detalle:jornadaSel?.nombre||'Quiniela',
-    quinielas:'📋 Quinielas',
-    ingresos:'💰 Ingresos',
+  const screenTitle: Record<Screen,string> = {
+    home: '🛡️ Admin',
+    crear_quiniela: 'Nueva quiniela',
+    jornada_detalle: jornadaSel?.nombre || 'Quiniela',
+    quinielas: '📋 Quinielas',
+    ingresos: '💰 Ingresos',
   };
 
   return(
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS==='ios'?'padding':'height'}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
 
-      {/* HEADER */}
+      {/* HEADER — solo X para salir, sin flechita */}
       <View style={[styles.header,{paddingTop:insets.top+14}]}>
-        {!isHome
-          ?<TouchableOpacity onPress={()=>setScreen('home')} style={styles.backBtn}><Ionicons name="arrow-back" size={20} color={C.text}/></TouchableOpacity>
-          :<TouchableOpacity onPress={()=>router.back()} style={styles.backBtn}><Ionicons name="close" size={20} color={C.text}/></TouchableOpacity>
-        }
+        {/* Placeholder izquierdo para mantener centrado el título */}
+        <View style={{width:36}}/>
         <Text style={styles.headerTitle} numberOfLines={1}>{screenTitle[screen]}</Text>
-        {screen==='jornada_detalle'
-          ?<View style={{width:36}}/>
-          :<View style={{width:36}}/>
-        }
+        {/* X para salir del panel admin */}
+        <TouchableOpacity onPress={()=>router.back()} style={styles.closeBtn}>
+          <Ionicons name="close" size={20} color={C.text}/>
+        </TouchableOpacity>
       </View>
 
       {/* CONTENT */}
@@ -798,16 +738,16 @@ export default function AdminScreen(){
         {screen==='ingresos'        && renderIngresos()}
       </View>
 
-      {/* BOTTOM NAV */}
-      {isHome&&(
+      {/* BOTTOM NAV — siempre visible excepto en wizard crear_quiniela */}
+      {mostrarNav && (
         <View style={[styles.bottomNav,{paddingBottom:insets.bottom+6}]}>
           <TouchableOpacity style={styles.navItem} onPress={()=>setScreen('home')} activeOpacity={0.7}>
-            <Ionicons name="home" size={22} color={C.accent}/>
-            <Text style={[styles.navLabel,{color:C.accent}]}>Inicio</Text>
+            <Ionicons name="home" size={22} color={screen==='home'?C.accent:C.textSub}/>
+            <Text style={[styles.navLabel,{color:screen==='home'?C.accent:C.textSub}]}>Inicio</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} onPress={()=>setScreen('quinielas')} activeOpacity={0.7}>
-            <Ionicons name="list-outline" size={22} color={C.textSub}/>
-            <Text style={[styles.navLabel,{color:C.textSub}]}>Quinielas</Text>
+            <Ionicons name="list-outline" size={22} color={screen==='quinielas'?C.accent:C.textSub}/>
+            <Text style={[styles.navLabel,{color:screen==='quinielas'?C.accent:C.textSub}]}>Quinielas</Text>
           </TouchableOpacity>
           {/* Botón central grande CREAR */}
           <View style={styles.navCenterWrap}>
@@ -816,8 +756,8 @@ export default function AdminScreen(){
             </TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.navItem} onPress={()=>setScreen('ingresos')} activeOpacity={0.7}>
-            <Ionicons name="cash-outline" size={22} color={C.textSub}/>
-            <Text style={[styles.navLabel,{color:C.textSub}]}>Ingresos</Text>
+            <Ionicons name="cash-outline" size={22} color={screen==='ingresos'?C.accent:C.textSub}/>
+            <Text style={[styles.navLabel,{color:screen==='ingresos'?C.accent:C.textSub}]}>Ingresos</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} onPress={cargarDatos} activeOpacity={0.7}>
             <Ionicons name="refresh-outline" size={22} color={C.textSub}/>
@@ -880,16 +820,14 @@ const styles=StyleSheet.create({
   center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
 
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingBottom:16,backgroundColor:C.bg},
-  backBtn:{width:36,height:36,borderRadius:10,backgroundColor:C.card,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
+  closeBtn:{width:36,height:36,borderRadius:10,backgroundColor:C.card,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
   headerTitle:{flex:1,color:C.text,fontSize:17,fontWeight:'bold',textAlign:'center',marginHorizontal:8},
 
-  // Stats
   statsGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:20},
   statChip:{width:(SW-42)/2,borderRadius:14,padding:14,borderWidth:1.5,gap:4},
   statChipVal:{fontSize:22,fontWeight:'900'},
   statChipLabel:{color:C.textSub,fontSize:11,fontWeight:'600'},
 
-  // Alerta
   alertaBanner:{flexDirection:'row',alignItems:'center',backgroundColor:C.orangeDim,borderWidth:1.5,borderColor:C.orange+'60',borderRadius:14,padding:14,marginBottom:20,gap:12},
   alertaIconWrap:{width:36,height:36,borderRadius:10,backgroundColor:C.orange+'20',justifyContent:'center',alignItems:'center'},
   alertaTitulo:{color:C.orange,fontWeight:'800',fontSize:14},
@@ -921,7 +859,6 @@ const styles=StyleSheet.create({
   btnAgregarRes:{flexDirection:'row',alignItems:'center',gap:4,borderWidth:1,borderColor:C.accent+'60',borderRadius:8,paddingHorizontal:10,paddingVertical:6,backgroundColor:C.accentDim},
   btnAgregarResTexto:{color:C.accent,fontSize:12,fontWeight:'700'},
 
-  // Wizard
   wizardIndicator:{flexDirection:'row',alignItems:'center',justifyContent:'center',paddingHorizontal:24,paddingVertical:16,backgroundColor:C.card,borderBottomWidth:1,borderBottomColor:C.cardBorder},
   wizardStepWrap:{alignItems:'center',gap:4},
   wizardDot:{width:28,height:28,borderRadius:14,borderWidth:2,borderColor:C.cardBorder,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
@@ -945,7 +882,6 @@ const styles=StyleSheet.create({
   btnSecundarioPrimary:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7,borderWidth:1.5,borderColor:C.accent,borderRadius:10,padding:11,marginTop:4},
   btnSecundarioPrimaryTexto:{color:C.accent,fontWeight:'700',fontSize:13},
 
-  // Importar
   ligaChip:{borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,paddingHorizontal:12,paddingVertical:8,backgroundColor:C.bg,minWidth:110,alignItems:'center'},
   ligaChipActiva:{borderColor:C.accent,backgroundColor:C.accentDim},
   ligaChipTexto:{color:C.textSub,fontSize:12,fontWeight:'700'},
@@ -962,7 +898,6 @@ const styles=StyleSheet.create({
   statusBadge:{borderWidth:1.5,borderRadius:6,paddingHorizontal:6,paddingVertical:2},
   statusTexto:{fontSize:10,fontWeight:'700'},
 
-  // Quinielas
   grupCard:{backgroundColor:C.card,borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.cardBorder},
   grupHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12},
   grupNombre:{color:C.text,fontWeight:'bold',fontSize:14,flex:1},
@@ -973,7 +908,6 @@ const styles=StyleSheet.create({
   btnPagarChico:{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:C.green,paddingHorizontal:10,paddingVertical:6,borderRadius:8},
   btnPagarChicoTexto:{color:'#fff',fontSize:11,fontWeight:'700'},
 
-  // Ingresos
   kpiRow:{flexDirection:'row',gap:10,marginBottom:14},
   kpiCard:{flex:1,borderRadius:14,padding:12,alignItems:'center',borderWidth:1.5,gap:2},
   kpiVal:{fontSize:20,fontWeight:'900'},
@@ -998,14 +932,12 @@ const styles=StyleSheet.create({
   emptyCard:{alignItems:'center',paddingVertical:50,gap:12},
   emptyTexto:{color:C.textSub,fontSize:13,textAlign:'center',maxWidth:220},
 
-  // Bottom nav
   bottomNav:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.cardBorder,paddingTop:10,alignItems:'flex-end'},
   navItem:{flex:1,alignItems:'center',gap:3,paddingBottom:4},
   navLabel:{fontSize:10,fontWeight:'600'},
   navCenterWrap:{flex:1,alignItems:'center',marginTop:-22},
   navCenterBtn:{width:56,height:56,borderRadius:28,backgroundColor:C.accent,justifyContent:'center',alignItems:'center',shadowColor:C.accent,shadowOpacity:0.5,shadowRadius:12,shadowOffset:{width:0,height:4},elevation:8},
 
-  // Modal
   modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.75)',justifyContent:'flex-end'},
   modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,paddingBottom:34,borderTopWidth:1,borderColor:C.cardBorder},
   modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4},
