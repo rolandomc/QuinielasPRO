@@ -1,30 +1,60 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, StatusBar } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
+  Alert, ActivityIndicator, Modal, StatusBar, Switch, FlatList,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { apifb } from '../lib/apiFootball';
 
-const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b' };
+const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700' };
 
 type Partido = { id:string; local:string; visitante:string; fecha:string; jornada:number; cerrado:boolean; resultado_final:string|null };
 type Quiniela = { id:string; jornada:number; estado_pago:string; usuario_id:string; usuarios:{nombre:string;username:string}|null };
+type Liga = { league:{id:number;name:string;logo:string}; country:{name:string;flag:string}; seasons:{year:number;current:boolean}[] };
+type Fixture = { fixture:{id:number;date:string;status:{short:string;elapsed:number|null}}; teams:{home:{name:string};away:{name:string}}; goals:{home:number|null;away:number|null} };
+
+type TabAdmin = 'partidos' | 'importar' | 'quinielas';
 
 export default function AdminScreen() {
   const { usuario } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [tab, setTab] = useState<'partidos'|'quinielas'>('partidos');
+
+  // Tabs
+  const [tab, setTab] = useState<TabAdmin>('partidos');
+
+  // DB data
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [quinielas, setQuinielas] = useState<Quiniela[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Modales manuales
   const [modalPartido, setModalPartido] = useState(false);
   const [modalResultado, setModalResultado] = useState(false);
   const [partidoSel, setPartidoSel] = useState<Partido|null>(null);
   const [resultadoInput, setResultadoInput] = useState<'1'|'X'|'2'|null>(null);
   const [saving, setSaving] = useState(false);
-  const [local,setLocal]=useState(''); const [visitante,setVisitante]=useState(''); const [fecha,setFecha]=useState(''); const [hora,setHora]=useState(''); const [jornada,setJornada]=useState('1');
+  const [local,setLocal]=useState(''); const [visitante,setVisitante]=useState('');
+  const [fecha,setFecha]=useState(''); const [hora,setHora]=useState(''); const [jornada,setJornada]=useState('1');
+
+  // API Football — importar
+  const [busquedaLiga, setBusquedaLiga] = useState('');
+  const [ligas, setLigas] = useState<Liga[]>([]);
+  const [loadingLigas, setLoadingLigas] = useState(false);
+  const [ligaSel, setLigaSel] = useState<Liga|null>(null);
+  const [modoBusqueda, setModoBusqueda] = useState<'dia'|'semana'>('dia');
+  const [fechaBusqueda, setFechaBusqueda] = useState(new Date().toISOString().split('T')[0]);
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+  const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [loadingFixtures, setLoadingFixtures] = useState(false);
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const [jornadaImport, setJornadaImport] = useState('1');
+  const [importando, setImportando] = useState(false);
 
   useEffect(() => {
     if (!usuario?.es_admin) { Alert.alert('Acceso denegado','No tienes permisos.'); router.back(); return; }
@@ -42,16 +72,58 @@ export default function AdminScreen() {
     setLoading(false);
   };
 
-  const agregarPartido = async () => {
-    if (!local||!visitante||!fecha||!hora||!jornada) { Alert.alert('Campos incompletos','Llena todos los campos.'); return; }
-    setSaving(true);
-    const { error } = await supabase.from('partidos').insert({ local:local.trim(), visitante:visitante.trim(), fecha:`${fecha}T${hora}:00-06:00`, jornada:parseInt(jornada), cerrado:false });
-    setSaving(false);
-    if (error) { Alert.alert('Error',error.message); return; }
-    setModalPartido(false); setLocal(''); setVisitante(''); setFecha(''); setHora('');
-    cargarDatos();
+  // ── API Football ──────────────────────────────────────────
+  const buscarLigas = async () => {
+    if (!busquedaLiga.trim()) return;
+    setLoadingLigas(true); setLigas([]);
+    try {
+      const data = await apifb.ligas(busquedaLiga.trim());
+      setLigas(data.response || []);
+    } catch { Alert.alert('Error','No se pudo conectar con la API.'); }
+    setLoadingLigas(false);
   };
 
+  const buscarFixtures = async () => {
+    if (!ligaSel) return;
+    setLoadingFixtures(true); setFixtures([]); setSeleccionados(new Set());
+    const season = ligaSel.seasons.find(s=>s.current)?.year.toString() ?? new Date().getFullYear().toString();
+    try {
+      let data;
+      if (modoBusqueda==='dia') {
+        data = await apifb.fixtures(String(ligaSel.league.id), season, fechaBusqueda);
+      } else {
+        data = await apifb.fixturesPorSemana(String(ligaSel.league.id), season, fechaDesde, fechaHasta);
+      }
+      setFixtures(data.response || []);
+    } catch { Alert.alert('Error','No se pudieron cargar los partidos.'); }
+    setLoadingFixtures(false);
+  };
+
+  const toggleSel = (id:number) => {
+    setSeleccionados(prev => { const s=new Set(prev); s.has(id)?s.delete(id):s.add(id); return s; });
+  };
+
+  const importarPartidos = async () => {
+    if (seleccionados.size===0) { Alert.alert('Sin selección','Selecciona al menos un partido.'); return; }
+    setImportando(true);
+    const selArr = fixtures.filter(f=>seleccionados.has(f.fixture.id));
+    const inserts = selArr.map(f => ({
+      local: f.teams.home.name,
+      visitante: f.teams.away.name,
+      fecha: f.fixture.date,
+      jornada: parseInt(jornadaImport),
+      cerrado: false,
+      api_fixture_id: f.fixture.id,
+    }));
+    const { error } = await supabase.from('partidos').insert(inserts);
+    setImportando(false);
+    if (error) { Alert.alert('Error al importar', error.message); return; }
+    Alert.alert('\u2705 Importados', `${inserts.length} partido(s) agregados a la Jornada ${jornadaImport}.`);
+    setSeleccionados(new Set()); setFixtures([]); setLigaSel(null);
+    setTab('partidos'); cargarDatos();
+  };
+
+  // ── Resultados manuales ───────────────────────────────────
   const guardarResultado = async () => {
     if (!resultadoInput||!partidoSel) return;
     setSaving(true);
@@ -76,6 +148,16 @@ export default function AdminScreen() {
     }
   };
 
+  const agregarPartido = async () => {
+    if (!local||!visitante||!fecha||!hora||!jornada) { Alert.alert('Campos incompletos','Llena todos los campos.'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('partidos').insert({ local:local.trim(), visitante:visitante.trim(), fecha:`${fecha}T${hora}:00-06:00`, jornada:parseInt(jornada), cerrado:false });
+    setSaving(false);
+    if (error) { Alert.alert('Error',error.message); return; }
+    setModalPartido(false); setLocal(''); setVisitante(''); setFecha(''); setHora('');
+    cargarDatos();
+  };
+
   const toggleCerrar = async (p:Partido) => { await supabase.from('partidos').update({cerrado:!p.cerrado}).eq('id',p.id); cargarDatos(); };
   const eliminarPartido = (id:string) => Alert.alert('Eliminar','\u00bfEliminar este partido?',[{text:'Cancelar',style:'cancel'},{text:'Eliminar',style:'destructive',onPress:async()=>{await supabase.from('partidos').delete().eq('id',id);cargarDatos();}}]);
   const marcarPagado = async (qId:string) => { const{error}=await supabase.from('quinielas').update({estado_pago:'pagado'}).eq('id',qId); if(error)Alert.alert('Error',error.message); else cargarDatos(); };
@@ -86,10 +168,12 @@ export default function AdminScreen() {
   const pagados = quinielas.filter(q=>q.estado_pago==='pagado').length;
   const pendientes = quinielas.filter(q=>q.estado_pago==='pendiente').length;
 
+  const statusColor = (s:string) => s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
+  const statusLabel = (s:string) => s==='FT'?'Finalizado':s==='NS'?'No iniciado':s==='HT'?'Medio tiempo':`En vivo`;
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-      {/* Header */}
       <View style={[styles.header,{paddingTop:insets.top+12}]}>
         <TouchableOpacity onPress={()=>router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text}/>
@@ -108,30 +192,35 @@ export default function AdminScreen() {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        <TouchableOpacity style={[styles.tabBtn,tab==='partidos'&&styles.tabActivo]} onPress={()=>setTab('partidos')}>
-          <Text style={[styles.tabTexto,tab==='partidos'&&styles.tabTextoActivo]}>⚽ Partidos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tabBtn,tab==='quinielas'&&styles.tabActivo]} onPress={()=>setTab('quinielas')}>
-          <Text style={[styles.tabTexto,tab==='quinielas'&&styles.tabTextoActivo]}>📋 Quinielas ({quinielas.length})</Text>
-        </TouchableOpacity>
+        {(['partidos','importar','quinielas'] as TabAdmin[]).map(t=>(
+          <TouchableOpacity key={t} style={[styles.tabBtn,tab===t&&styles.tabActivo]} onPress={()=>setTab(t)}>
+            <Text style={[styles.tabTexto,tab===t&&styles.tabTextoActivo]}>
+              {t==='partidos'?'⚽ Partidos':t==='importar'?'📡 Importar':'📋 Quinielas'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false}>
-        {tab==='partidos' ? (
+      <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+        {/* ── TAB PARTIDOS ── */}
+        {tab==='partidos' && (
           <>
             <TouchableOpacity style={styles.btnAgregar} onPress={()=>setModalPartido(true)} activeOpacity={0.8}>
               <Ionicons name="add-circle" size={20} color="#fff"/>
-              <Text style={styles.btnAgregarTexto}>Agregar partido</Text>
+              <Text style={styles.btnAgregarTexto}>Agregar partido manualmente</Text>
             </TouchableOpacity>
-            {partidos.map(p=>(
+            {partidos.length===0 ? (
+              <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay partidos. Importa desde la API o agrega manualmente.</Text></View>
+            ) : partidos.map(p=>(
               <View key={p.id} style={styles.card}>
-                <Text style={styles.cardJornada}>Jornada {p.jornada}</Text>
+                <Text style={styles.cardJornada}>Jornada {p.jornada} {p.cerrado&&<Text style={{color:C.red}}> • Cerrado</Text>}</Text>
                 <Text style={styles.cardPartido}>{p.local} vs {p.visitante}</Text>
                 <Text style={styles.cardFecha}>{new Date(p.fecha).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
                 {p.resultado_final&&(
                   <View style={styles.resultadoTag}>
                     <Ionicons name="checkmark-circle" size={13} color={C.green}/>
-                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante: ${p.visitante}`}</Text>
+                    <Text style={styles.resultadoTagTexto}>{p.resultado_final==='1'?`Local gana: ${p.local}`:p.resultado_final==='X'?'Empate':`Visitante gana: ${p.visitante}`}</Text>
                   </View>
                 )}
                 <View style={styles.cardActions}>
@@ -148,7 +237,129 @@ export default function AdminScreen() {
               </View>
             ))}
           </>
-        ) : (
+        )}
+
+        {/* ── TAB IMPORTAR ── */}
+        {tab==='importar' && (
+          <View style={{padding:16}}>
+            {/* Paso 1 — Buscar liga */}
+            <View style={styles.pasoCard}>
+              <Text style={styles.pasoNum}>1</Text>
+              <View style={{flex:1}}>
+                <Text style={styles.pasoTitulo}>Buscar liga</Text>
+                <View style={styles.searchRow}>
+                  <TextInput
+                    style={[styles.input,{flex:1,marginBottom:0}]}
+                    value={busquedaLiga}
+                    onChangeText={setBusquedaLiga}
+                    placeholder="Liga MX, Premier League..."
+                    placeholderTextColor="#555577"
+                    onSubmitEditing={buscarLigas}
+                  />
+                  <TouchableOpacity style={styles.btnSearch} onPress={buscarLigas} activeOpacity={0.8}>
+                    {loadingLigas?<ActivityIndicator color="#fff" size="small"/>:<Ionicons name="search" size={18} color="#fff"/>}
+                  </TouchableOpacity>
+                </View>
+
+                {ligas.length>0 && (
+                  <ScrollView style={styles.ligasLista} nestedScrollEnabled>
+                    {ligas.map(l=>(
+                      <TouchableOpacity key={l.league.id} style={[styles.ligaRow, ligaSel?.league.id===l.league.id&&styles.ligaRowActiva]} onPress={()=>setLigaSel(l)} activeOpacity={0.7}>
+                        <View style={{flex:1}}>
+                          <Text style={styles.ligaNombre}>{l.league.name}</Text>
+                          <Text style={styles.ligaPais}>{l.country.name} • {l.seasons.find(s=>s.current)?.year}</Text>
+                        </View>
+                        {ligaSel?.league.id===l.league.id && <Ionicons name="checkmark-circle" size={20} color={C.accent}/>}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+            </View>
+
+            {/* Paso 2 — Buscar partidos */}
+            {ligaSel && (
+              <View style={styles.pasoCard}>
+                <Text style={styles.pasoNum}>2</Text>
+                <View style={{flex:1}}>
+                  <Text style={styles.pasoTitulo}>Buscar partidos — {ligaSel.league.name}</Text>
+                  <View style={styles.modoRow}>
+                    <TouchableOpacity style={[styles.modoBtn,modoBusqueda==='dia'&&styles.modoBtnActivo]} onPress={()=>setModoBusqueda('dia')}>
+                      <Text style={[styles.modoBtnTexto,modoBusqueda==='dia'&&{color:C.accent}]}>Por día</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.modoBtn,modoBusqueda==='semana'&&styles.modoBtnActivo]} onPress={()=>setModoBusqueda('semana')}>
+                      <Text style={[styles.modoBtnTexto,modoBusqueda==='semana'&&{color:C.accent}]}>Por semana</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {modoBusqueda==='dia' ? (
+                    <><Text style={styles.label}>Fecha (YYYY-MM-DD)</Text>
+                    <TextInput style={styles.input} value={fechaBusqueda} onChangeText={setFechaBusqueda} placeholder="2026-06-21" placeholderTextColor="#555577"/></>
+                  ) : (
+                    <><Text style={styles.label}>Desde</Text>
+                    <TextInput style={styles.input} value={fechaDesde} onChangeText={setFechaDesde} placeholder="2026-06-21" placeholderTextColor="#555577"/>
+                    <Text style={styles.label}>Hasta</Text>
+                    <TextInput style={styles.input} value={fechaHasta} onChangeText={setFechaHasta} placeholder="2026-06-28" placeholderTextColor="#555577"/></>
+                  )}
+
+                  <TouchableOpacity style={styles.btnBuscarFixtures} onPress={buscarFixtures} activeOpacity={0.8}>
+                    {loadingFixtures?<ActivityIndicator color="#fff" size="small"/>:<><Ionicons name="football" size={16} color="#fff"/><Text style={styles.btnBuscarFixturesTexto}>Ver partidos</Text></>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Paso 3 — Seleccionar partidos */}
+            {fixtures.length>0 && (
+              <View style={styles.pasoCard}>
+                <Text style={styles.pasoNum}>3</Text>
+                <View style={{flex:1}}>
+                  <Text style={styles.pasoTitulo}>Seleccionar partidos ({seleccionados.size} elegidos)</Text>
+                  {fixtures.map(f=>{
+                    const sel = seleccionados.has(f.fixture.id);
+                    const st = f.fixture.status.short;
+                    return (
+                      <TouchableOpacity key={f.fixture.id} style={[styles.fixtureRow,sel&&styles.fixtureRowSel]} onPress={()=>toggleSel(f.fixture.id)} activeOpacity={0.7}>
+                        <View style={[styles.checkbox,sel&&styles.checkboxSel]}>
+                          {sel&&<Ionicons name="checkmark" size={14} color="#fff"/>}
+                        </View>
+                        <View style={{flex:1,marginLeft:10}}>
+                          <Text style={styles.fixtureEquipos}>{f.teams.home.name} vs {f.teams.away.name}</Text>
+                          <Text style={styles.fixtureFecha}>{new Date(f.fixture.date).toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</Text>
+                        </View>
+                        <View style={[styles.statusBadge,{borderColor:statusColor(st)}]}>
+                          <Text style={[styles.statusTexto,{color:statusColor(st)}]}>{st}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Paso 4 — Crear quiniela */}
+            {seleccionados.size>0 && (
+              <View style={styles.pasoCard}>
+                <Text style={styles.pasoNum}>4</Text>
+                <View style={{flex:1}}>
+                  <Text style={styles.pasoTitulo}>Crear quiniela</Text>
+                  <Text style={styles.label}>Número de jornada</Text>
+                  <TextInput style={styles.input} value={jornadaImport} onChangeText={setJornadaImport} keyboardType="number-pad" placeholderTextColor="#555577"/>
+                  <TouchableOpacity style={[styles.btnImportar,importando&&{opacity:0.6}]} onPress={importarPartidos} disabled={importando} activeOpacity={0.8}>
+                    {importando?<ActivityIndicator color="#fff"/>:<><Ionicons name="cloud-upload" size={18} color="#fff"/><Text style={styles.btnImportarTexto}>Crear Jornada {jornadaImport} ({seleccionados.size} partidos)</Text></>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {fixtures.length===0&&!loadingFixtures&&ligaSel&&(
+              <View style={styles.emptyBox}><Text style={styles.emptyText}>No se encontraron partidos. Prueba otra fecha.</Text></View>
+            )}
+          </View>
+        )}
+
+        {/* ── TAB QUINIELAS ── */}
+        {tab==='quinielas' && (
           quinielas.length===0 ? (
             <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas aún.</Text></View>
           ) : (
@@ -173,19 +384,16 @@ export default function AdminScreen() {
             ))
           )
         )}
-        <View style={{height:40}}/>
+        <View style={{height:60}}/>
       </ScrollView>
 
-      {/* Modal nuevo partido */}
+      {/* Modal partido manual */}
       <Modal visible={modalPartido} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitulo}>Nuevo partido</Text>
-            {[['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']].map(([lbl,val,set,ph])=>(
-              <View key={lbl as string}>
-                <Text style={styles.label}>{lbl as string}</Text>
-                <TextInput style={styles.input} value={val as string} onChangeText={set as any} placeholder={ph as string} placeholderTextColor="#555577" />
-              </View>
+            {([['Equipo local',local,setLocal,'América'],['Equipo visitante',visitante,setVisitante,'Chivas'],['Fecha (YYYY-MM-DD)',fecha,setFecha,'2026-07-05'],['Hora (HH:MM)',hora,setHora,'20:00']] as const).map(([lbl,val,set,ph]: any)=>(
+              <View key={lbl}><Text style={styles.label}>{lbl}</Text><TextInput style={styles.input} value={val} onChangeText={set} placeholder={ph} placeholderTextColor="#555577"/></View>
             ))}
             <Text style={styles.label}>Jornada</Text>
             <TextInput style={styles.input} value={jornada} onChangeText={setJornada} keyboardType="number-pad"/>
@@ -239,9 +447,9 @@ const styles = StyleSheet.create({
   tabs:{flexDirection:'row',marginHorizontal:16,marginBottom:8,backgroundColor:C.card,borderRadius:12,padding:4,borderWidth:1,borderColor:C.cardBorder},
   tabBtn:{flex:1,padding:10,alignItems:'center',borderRadius:10},
   tabActivo:{backgroundColor:C.accentDim},
-  tabTexto:{fontSize:14,fontWeight:'600',color:C.textSub}, tabTextoActivo:{color:C.accent},
-  btnAgregar:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:C.accent,marginHorizontal:16,marginBottom:8,padding:14,borderRadius:12,justifyContent:'center'},
-  btnAgregarTexto:{color:'#fff',fontWeight:'bold',fontSize:15},
+  tabTexto:{fontSize:12,fontWeight:'600',color:C.textSub}, tabTextoActivo:{color:C.accent},
+  btnAgregar:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:'#1e2a35',borderWidth:1,borderColor:C.cardBorder,marginHorizontal:16,marginBottom:8,padding:13,borderRadius:12,justifyContent:'center'},
+  btnAgregarTexto:{color:C.textSub,fontWeight:'600',fontSize:14},
   card:{backgroundColor:C.card,marginHorizontal:16,marginBottom:8,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
   cardRow:{flexDirection:'row',alignItems:'center'},
   cardJornada:{fontSize:11,color:C.accent,fontWeight:'600',marginBottom:2},
@@ -252,14 +460,42 @@ const styles = StyleSheet.create({
   cardActions:{flexDirection:'row',gap:6,flexWrap:'wrap'},
   actionBtn:{paddingHorizontal:12,paddingVertical:7,borderRadius:8,alignItems:'center'},
   actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
-  emptyBox:{margin:20,padding:20,backgroundColor:C.card,borderRadius:12,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
-  emptyText:{color:C.textSub,fontSize:14},
+  emptyBox:{margin:16,padding:20,backgroundColor:C.card,borderRadius:12,alignItems:'center',borderWidth:1,borderColor:C.cardBorder},
+  emptyText:{color:C.textSub,fontSize:14,textAlign:'center'},
+  // Importar
+  pasoCard:{backgroundColor:C.card,borderRadius:14,padding:16,marginBottom:12,borderWidth:1,borderColor:C.cardBorder,flexDirection:'row',gap:12},
+  pasoNum:{width:28,height:28,borderRadius:14,backgroundColor:C.accentDim,borderWidth:1,borderColor:C.accent,textAlign:'center',lineHeight:28,color:C.accent,fontWeight:'bold',fontSize:14},
+  pasoTitulo:{color:C.text,fontWeight:'bold',fontSize:14,marginBottom:12},
+  searchRow:{flexDirection:'row',gap:8},
+  btnSearch:{backgroundColor:C.accent,paddingHorizontal:14,paddingVertical:12,borderRadius:10,justifyContent:'center',alignItems:'center'},
+  ligasLista:{maxHeight:200,marginTop:10,borderRadius:10,borderWidth:1,borderColor:C.cardBorder},
+  ligaRow:{flexDirection:'row',alignItems:'center',padding:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
+  ligaRowActiva:{backgroundColor:C.accentDim},
+  ligaNombre:{color:C.text,fontWeight:'600',fontSize:13},
+  ligaPais:{color:C.textSub,fontSize:11,marginTop:2},
+  modoRow:{flexDirection:'row',gap:8,marginBottom:12},
+  modoBtn:{flex:1,padding:9,borderRadius:10,borderWidth:1.5,borderColor:C.cardBorder,alignItems:'center'},
+  modoBtnActivo:{borderColor:C.accent,backgroundColor:C.accentDim},
+  modoBtnTexto:{color:C.textSub,fontWeight:'600',fontSize:13},
+  btnBuscarFixtures:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:C.accent,padding:13,borderRadius:10,marginTop:4},
+  btnBuscarFixturesTexto:{color:'#fff',fontWeight:'bold',fontSize:14},
+  fixtureRow:{flexDirection:'row',alignItems:'center',padding:12,borderRadius:10,marginBottom:6,borderWidth:1.5,borderColor:C.cardBorder,backgroundColor:'#12121f'},
+  fixtureRowSel:{borderColor:C.accent,backgroundColor:C.accentDim},
+  checkbox:{width:22,height:22,borderRadius:6,borderWidth:2,borderColor:C.textSub,justifyContent:'center',alignItems:'center'},
+  checkboxSel:{backgroundColor:C.accent,borderColor:C.accent},
+  fixtureEquipos:{color:C.text,fontWeight:'600',fontSize:13},
+  fixtureFecha:{color:C.textSub,fontSize:11,marginTop:2},
+  statusBadge:{borderWidth:1.5,borderRadius:6,paddingHorizontal:6,paddingVertical:2},
+  statusTexto:{fontSize:10,fontWeight:'700'},
+  btnImportar:{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:C.green,padding:15,borderRadius:12,marginTop:4},
+  btnImportarTexto:{color:'#fff',fontWeight:'bold',fontSize:15},
+  // Modales
   modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
   modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,borderTopWidth:1,borderColor:C.cardBorder},
   modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4},
   modalSubtitulo:{fontSize:13,color:C.textSub,marginBottom:16},
-  label:{fontSize:13,fontWeight:'600',color:C.textSub,marginBottom:5},
-  input:{borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,padding:12,marginBottom:12,fontSize:14,color:C.text,backgroundColor:'#12121f'},
+  label:{fontSize:13,fontWeight:'600',color:C.textSub,marginBottom:5,marginTop:2},
+  input:{borderWidth:1.5,borderColor:C.cardBorder,borderRadius:10,padding:12,marginBottom:10,fontSize:14,color:C.text,backgroundColor:'#12121f'},
   resultadoOpciones:{flexDirection:'row',gap:10,marginBottom:16},
   resultadoOpcion:{flex:1,borderWidth:2,borderColor:C.cardBorder,borderRadius:12,padding:14,alignItems:'center',backgroundColor:'#12121f'},
   resultadoOpcionActiva:{borderColor:C.accent,backgroundColor:C.accentDim},
