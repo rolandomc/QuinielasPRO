@@ -1,54 +1,176 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl } from 'react-native';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 
-// Datos de ejemplo — se reemplazarán con datos reales de Supabase
-const POSICIONES_EJEMPLO = [
-  { lugar: 1, nombre: 'Rolando M.', aciertos: 4, premio: '$500' },
-  { lugar: 2, nombre: 'Carlos R.', aciertos: 3, premio: '-' },
-  { lugar: 3, nombre: 'Ana G.', aciertos: 3, premio: '-' },
-  { lugar: 4, nombre: 'Luis T.', aciertos: 2, premio: '-' },
-  { lugar: 5, nombre: 'María S.', aciertos: 1, premio: '-' },
-];
+type Posicion = {
+  usuario_id: string;
+  nombre: string;
+  aciertos: number;
+  total_partidos: number;
+};
+
+type Partido = {
+  id: string;
+  local: string;
+  visitante: string;
+  resultado_final: string | null;
+  jornada: number;
+};
 
 export default function ResultadosScreen() {
+  const { user } = useAuth();
+  const [posiciones, setPosiciones] = useState<Posicion[]>([]);
+  const [partidos, setPartidos] = useState<Partido[]>([]);
+  const [jornada, setJornada] = useState<number>(1);
+  const [jornadas, setJornadas] = useState<number[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [miPosicion, setMiPosicion] = useState<number | null>(null);
+
+  const cargar = useCallback(async (j?: number) => {
+    setLoading(true);
+    // Obtener jornadas disponibles
+    const { data: jornadasData } = await supabase
+      .from('partidos')
+      .select('jornada')
+      .order('jornada');
+    const unicas = [...new Set((jornadasData || []).map((p: any) => p.jornada))] as number[];
+    setJornadas(unicas);
+    const jornadaActual = j ?? (unicas[unicas.length - 1] || 1);
+    setJornada(jornadaActual);
+
+    // Cargar partidos de la jornada
+    const { data: partidosData } = await supabase
+      .from('partidos')
+      .select('id, local, visitante, resultado_final, jornada')
+      .eq('jornada', jornadaActual)
+      .order('fecha');
+    setPartidos(partidosData || []);
+
+    // Cargar tabla de posiciones desde quinielas
+    const { data: quinielasData } = await supabase
+      .from('quinielas')
+      .select('usuario_id, aciertos, usuarios(nombre)')
+      .eq('jornada', jornadaActual)
+      .eq('estado_pago', 'pagado')
+      .order('aciertos', { ascending: false });
+
+    const tabla: Posicion[] = (quinielasData || []).map((q: any) => ({
+      usuario_id: q.usuario_id,
+      nombre: q.usuarios?.nombre || 'Jugador',
+      aciertos: q.aciertos || 0,
+      total_partidos: partidosData?.length || 0,
+    }));
+    setPosiciones(tabla);
+
+    if (user) {
+      const pos = tabla.findIndex(p => p.usuario_id === user.id);
+      setMiPosicion(pos >= 0 ? pos + 1 : null);
+    }
+    setLoading(false);
+    setRefreshing(false);
+  }, [user]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const medalla = (lugar: number) => {
+    if (lugar === 1) return '🥇';
+    if (lugar === 2) return '🥈';
+    if (lugar === 3) return '🥉';
+    return `${lugar}`;
+  };
+
+  const hayResultados = partidos.some(p => p.resultado_final);
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); cargar(jornada); }} colors={['#009ee3']} />}
+    >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🏆 Tabla de Posiciones</Text>
-        <Text style={styles.headerSub}>Jornada actual</Text>
+        {miPosicion && (
+          <Text style={styles.miPosicion}>Tu posición: #{miPosicion}</Text>
+        )}
       </View>
 
-      <View style={styles.tableHeader}>
-        <Text style={[styles.col, styles.colLugar]}>#</Text>
-        <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
-        <Text style={[styles.col, styles.colAciertos]}>Aciertos</Text>
-        <Text style={[styles.col, styles.colPremio]}>Premio</Text>
-      </View>
+      {/* Selector de jornada */}
+      {jornadas.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.jornadasScroll}>
+          {jornadas.map(j => (
+            <TouchableOpacity
+              key={j}
+              style={[styles.jornadaBtn, jornada === j && styles.jornadaBtnActivo]}
+              onPress={() => cargar(j)}
+            >
+              <Text style={[styles.jornadaBtnTexto, jornada === j && styles.jornadaBtnTextoActivo]}>J{j}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
-      {POSICIONES_EJEMPLO.map((jugador) => (
-        <View
-          key={jugador.lugar}
-          style={[styles.row, jugador.lugar === 1 && styles.rowGanador]}
-        >
-          <Text style={[styles.col, styles.colLugar, jugador.lugar === 1 && styles.textoGanador]}>
-            {jugador.lugar === 1 ? '🥇' : jugador.lugar === 2 ? '🥈' : jugador.lugar === 3 ? '🥉' : jugador.lugar}
-          </Text>
-          <Text style={[styles.col, styles.colNombre, jugador.lugar === 1 && styles.textoGanador]}>
-            {jugador.nombre}
-          </Text>
-          <Text style={[styles.col, styles.colAciertos, jugador.lugar === 1 && styles.textoGanador]}>
-            {jugador.aciertos}/5
-          </Text>
-          <Text style={[styles.col, styles.colPremio, jugador.lugar === 1 && styles.premioTexto]}>
-            {jugador.premio}
-          </Text>
+      {/* Resultados de partidos */}
+      {partidos.length > 0 && (
+        <View style={styles.seccion}>
+          <Text style={styles.seccionTitulo}>⚽ Resultados Jornada {jornada}</Text>
+          {partidos.map(p => (
+            <View key={p.id} style={styles.partidoRow}>
+              <Text style={styles.partidoEquipo}>{p.local}</Text>
+              <View style={[styles.resultadoBadge, p.resultado_final ? styles.resultadoReal : styles.resultadoPendiente]}>
+                <Text style={styles.resultadoTexto}>
+                  {p.resultado_final === '1' ? `1 - ${p.local.slice(0,3).toUpperCase()}` :
+                   p.resultado_final === 'X' ? 'X - Empate' :
+                   p.resultado_final === '2' ? `2 - ${p.visitante.slice(0,3).toUpperCase()}` :
+                   'Pendiente'}
+                </Text>
+              </View>
+              <Text style={styles.partidoEquipo}>{p.visitante}</Text>
+            </View>
+          ))}
         </View>
-      ))}
+      )}
 
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>ℹ️ Resultados de partidos</Text>
-        <Text style={styles.infoText}>Los resultados se actualizan al finalizar cada partido.</Text>
-      </View>
+      {/* Tabla */}
+      {loading ? (
+        <ActivityIndicator color="#009ee3" style={{ margin: 30 }} />
+      ) : !hayResultados ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyEmoji}>⏰</Text>
+          <Text style={styles.emptyTitulo}>Resultados pendientes</Text>
+          <Text style={styles.emptyTexto}>La tabla se actualizará cuando el administrador capture los resultados.</Text>
+        </View>
+      ) : posiciones.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyTexto}>No hay participantes con pago confirmado.</Text>
+        </View>
+      ) : (
+        <View style={styles.tabla}>
+          <View style={styles.tablaHeader}>
+            <Text style={[styles.col, styles.colLugar]}>#</Text>
+            <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
+            <Text style={[styles.col, styles.colAciertos]}>Aciertos</Text>
+          </View>
+          {posiciones.map((p, i) => (
+            <View key={p.usuario_id} style={[
+              styles.tablaRow,
+              i === 0 && styles.rowOro,
+              i === 1 && styles.rowPlata,
+              i === 2 && styles.rowBronce,
+              p.usuario_id === user?.id && styles.rowMio,
+            ]}>
+              <Text style={[styles.col, styles.colLugar, styles.colLugarTexto]}>{medalla(i + 1)}</Text>
+              <Text style={[styles.col, styles.colNombre, p.usuario_id === user?.id && styles.textoMio]}>
+                {p.nombre}{p.usuario_id === user?.id ? ' (tú)' : ''}
+              </Text>
+              <Text style={[styles.col, styles.colAciertos, i === 0 && styles.textoOro]}>
+                {p.aciertos}/{p.total_partidos}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      <View style={{ height: 30 }} />
     </ScrollView>
   );
 }
@@ -57,40 +179,36 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f2f5' },
   header: { backgroundColor: '#1a1a2e', padding: 20, alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  headerSub: { color: '#009ee3', fontSize: 14, marginTop: 4 },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#009ee3',
-    padding: 12,
-    marginTop: 10,
-    marginHorizontal: 10,
-    borderRadius: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    padding: 12,
-    marginHorizontal: 10,
-    marginTop: 4,
-    borderRadius: 8,
-    elevation: 1,
-  },
-  rowGanador: { backgroundColor: '#fff8e1', borderWidth: 1.5, borderColor: '#ffc107' },
+  miPosicion: { color: '#ffc107', fontSize: 14, marginTop: 6, fontWeight: '600' },
+  jornadasScroll: { backgroundColor: '#fff', paddingVertical: 10, paddingHorizontal: 8 },
+  jornadaBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, marginHorizontal: 4, borderWidth: 1.5, borderColor: '#ddd' },
+  jornadaBtnActivo: { backgroundColor: '#009ee3', borderColor: '#009ee3' },
+  jornadaBtnTexto: { color: '#888', fontWeight: '600' },
+  jornadaBtnTextoActivo: { color: '#fff' },
+  seccion: { backgroundColor: '#fff', margin: 10, borderRadius: 12, padding: 14, elevation: 2 },
+  seccionTitulo: { fontWeight: 'bold', color: '#1a1a2e', fontSize: 14, marginBottom: 10 },
+  partidoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  partidoEquipo: { flex: 1, fontSize: 12, color: '#333', fontWeight: '600', textAlign: 'center' },
+  resultadoBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginHorizontal: 6 },
+  resultadoReal: { backgroundColor: '#1a1a2e' },
+  resultadoPendiente: { backgroundColor: '#eee' },
+  resultadoTexto: { fontSize: 11, fontWeight: 'bold', color: '#fff' },
+  emptyBox: { alignItems: 'center', padding: 40 },
+  emptyEmoji: { fontSize: 50, marginBottom: 10 },
+  emptyTitulo: { fontSize: 16, fontWeight: 'bold', color: '#1a1a2e', marginBottom: 6 },
+  emptyTexto: { color: '#888', fontSize: 13, textAlign: 'center' },
+  tabla: { margin: 10 },
+  tablaHeader: { flexDirection: 'row', backgroundColor: '#009ee3', padding: 12, borderRadius: 8, marginBottom: 4 },
+  tablaRow: { flexDirection: 'row', backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 4, elevation: 1 },
+  rowOro: { backgroundColor: '#fff8e1', borderWidth: 1.5, borderColor: '#ffc107' },
+  rowPlata: { backgroundColor: '#f5f5f5', borderWidth: 1, borderColor: '#bdbdbd' },
+  rowBronce: { backgroundColor: '#fbe9e7', borderWidth: 1, borderColor: '#ff8a65' },
+  rowMio: { borderWidth: 2, borderColor: '#009ee3' },
   col: { fontSize: 14, color: '#333' },
-  colLugar: { width: 40, textAlign: 'center', fontWeight: 'bold' },
+  colLugar: { width: 40, textAlign: 'center' },
+  colLugarTexto: { fontWeight: 'bold', fontSize: 16 },
   colNombre: { flex: 1 },
-  colAciertos: { width: 70, textAlign: 'center' },
-  colPremio: { width: 70, textAlign: 'right', color: '#888' },
-  textoGanador: { color: '#b8860b', fontWeight: 'bold' },
-  premioTexto: { color: '#2e7d32', fontWeight: 'bold' },
-  infoBox: {
-    backgroundColor: '#e3f2fd',
-    margin: 15,
-    padding: 15,
-    borderRadius: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#009ee3',
-  },
-  infoTitle: { fontWeight: 'bold', color: '#1a1a2e', marginBottom: 4 },
-  infoText: { color: '#555', fontSize: 13 },
+  colAciertos: { width: 65, textAlign: 'center', fontWeight: 'bold' },
+  textoOro: { color: '#b8860b' },
+  textoMio: { color: '#009ee3', fontWeight: 'bold' },
 });
