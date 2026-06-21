@@ -41,9 +41,9 @@ serve(async (req: Request) => {
     }
 
     const usuarioId = pago.metadata?.usuario_id;
-    const jornada = pago.metadata?.jornada;
+    const jornadaId = pago.metadata?.jornada_id;
 
-    if (!usuarioId || !jornada) {
+    if (!usuarioId || !jornadaId) {
       console.error('Metadata faltante:', pago.metadata);
       return new Response('Metadata incompleta', { status: 400 });
     }
@@ -57,14 +57,14 @@ serve(async (req: Request) => {
       .from('quinielas')
       .update({ estado_pago: 'pagado' })
       .eq('usuario_id', usuarioId)
-      .eq('jornada', jornada);
+      .eq('jornada_id', jornadaId);
 
     if (error) {
       console.error('Error actualizando:', error);
       return new Response('Error DB', { status: 500 });
     }
 
-    console.log(`Pagado: usuario=${usuarioId} jornada=${jornada}`);
+    console.log(`Pagado: usuario=${usuarioId} jornada_id=${jornadaId}`);
     return new Response('OK', { status: 200 });
 
   } catch (e) {

@@ -41,17 +41,14 @@ export default function AdminScreen() {
   const [jornadaSel, setJornadaSel] = useState<Jornada|null>(null);
   const [syncing, setSyncing]     = useState(false);
 
-  // Nueva jornada modal
   const [modalNueva, setModalNueva] = useState(false);
   const [nombreJornada, setNombreJornada] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Resultado manual
   const [modalResultado, setModalResultado] = useState(false);
   const [partidoSel, setPartidoSel]         = useState<Partido|null>(null);
   const [resultadoInput, setResultadoInput] = useState<'1'|'X'|'2'|null>(null);
 
-  // Importar
   const [ligaId, setLigaId]       = useState('2000');
   const [temporada, setTemporada] = useState('2026');
   const [modoBusqueda, setModoBusqueda] = useState<'jornada'|'fecha'|'semana'>('jornada');
@@ -75,7 +72,8 @@ export default function AdminScreen() {
     const [{ data:j },{ data:p },{ data:q }] = await Promise.all([
       supabase.from('jornadas').select('*').order('creado_at', { ascending:false }),
       supabase.from('partidos').select('*').order('fecha'),
-      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuarios(nombre,username)').order('creado_at',{ascending:false}),
+      // Fix: quinielas usa creado_en, no creado_at
+      supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuarios(nombre,username)'),
     ]);
     if (j) setJornadas(j);
     if (p) setPartidos(p);
@@ -83,7 +81,6 @@ export default function AdminScreen() {
     setLoading(false);
   };
 
-  // ─ Jornadas ───────────────────────────────────────────
   const crearJornada = async () => {
     if (!nombreJornada.trim()) { Alert.alert('Falta nombre'); return; }
     setSaving(true);
@@ -123,7 +120,6 @@ export default function AdminScreen() {
     );
   };
 
-  // ─ Resultados automáticos desde API ────────────────────────
   const sincronizarResultados = async (j: Jornada) => {
     if (!j.api_competition_id || !j.api_season || !j.api_matchday) {
       Alert.alert('Sin datos API', 'Esta jornada no tiene competition_id, season o matchday configurados.\n\nEdita la jornada o usa resultados manuales.');
@@ -175,7 +171,6 @@ export default function AdminScreen() {
     }
   };
 
-  // ─ Resultado manual ──────────────────────────────────────
   const guardarResultado = async () => {
     if (!resultadoInput || !partidoSel) return;
     setSaving(true);
@@ -184,7 +179,6 @@ export default function AdminScreen() {
     setSaving(false); setModalResultado(false); cargarDatos();
   };
 
-  // ─ Importar ─────────────────────────────────────────────
   const buscarFixtures = async () => {
     if (!ligaId || !temporada) { Alert.alert('Faltan datos'); return; }
     setLoadingFix(true); setFixtures([]); setSeleccionados(new Set());
@@ -216,7 +210,6 @@ export default function AdminScreen() {
         cerrado: false,
         api_fixture_id: f.fixture.id,
       }));
-    // Guardar api_matchday en la jornada si viene de jornada
     if (modoBusqueda === 'jornada' && jDest) {
       await supabase.from('jornadas').update({
         api_competition_id: ligaId,
@@ -239,8 +232,8 @@ export default function AdminScreen() {
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large"/></View>;
 
-  const pagados   = quinielas.filter(q => q.estado_pago === 'pagado').length;
-  const pendientes= quinielas.filter(q => q.estado_pago === 'pendiente').length;
+  const pagados    = quinielas.filter(q => q.estado_pago === 'pagado').length;
+  const pendientes = quinielas.filter(q => q.estado_pago === 'pendiente').length;
   const statusColor = (s:string) => s==='FT'?C.green:s==='NS'?C.textSub:C.orange;
   const estadoColor = (e:string) => e==='abierta'?C.green:e==='cerrada'?C.orange:C.textSub;
 
@@ -304,7 +297,6 @@ export default function AdminScreen() {
                     </View>
                   </View>
 
-                  {/* Partidos de esta jornada */}
                   {pJ.map(p => (
                     <View key={p.id} style={styles.partidoRow}>
                       <View style={{flex:1}}>
@@ -320,7 +312,6 @@ export default function AdminScreen() {
                     </View>
                   ))}
 
-                  {/* Acciones */}
                   <View style={styles.jornadaAcciones}>
                     {isOpen && (
                       <TouchableOpacity style={[styles.accionBtn,{backgroundColor:C.orange}]} onPress={()=>cerrarJornada(j)}>
@@ -349,7 +340,6 @@ export default function AdminScreen() {
         {/* ====== IMPORTAR ====== */}
         {tab==='importar' && (
           <View style={{padding:16}}>
-            {/* Ligas rápidas */}
             <View style={styles.seccionCard}>
               <Text style={styles.seccionTitulo}>⚡ Ligas rápidas</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:4}}>
@@ -440,18 +430,27 @@ export default function AdminScreen() {
             {quinielas.length===0
               ? <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas registradas.</Text></View>
               : quinielas.map(q=>{
-                const j = jornadas.find(j=>j.id===q.jornada_id);
+                const j = jornadas.find(jj=>jj.id===q.jornada_id);
                 return (
                   <View key={q.id} style={styles.card}>
                     <View style={styles.cardRow}>
                       <View style={{flex:1}}>
-                        <Text style={styles.cardUser}>{(q.usuarios as any)?.username?`@${(q.usuarios as any).username}`:(q.usuarios as any)?.nombre||'Usuario'}</Text>
-                        <Text style={styles.cardJornada}>{j?.nombre||'Jornada desconocida'}</Text>
-                        {q.codigo&&<Text style={styles.cardCodigo}>🎫 {q.codigo}</Text>}
+                        <Text style={styles.cardUser}>{(q.usuarios as any)?.username ? `@${(q.usuarios as any).username}` : (q.usuarios as any)?.nombre || 'Usuario'}</Text>
+                        <Text style={styles.cardJornada}>{j?.nombre || 'Jornada desconocida'}</Text>
+                        {q.codigo && <Text style={styles.cardCodigo}>🎫 {q.codigo}</Text>}
+                        <Text style={[styles.cardEstado, q.estado_pago==='pagado' ? styles.estadoPagado : styles.estadoPendiente]}>
+                          {q.estado_pago==='pagado' ? '✅ Pagado' : '⏳ Pendiente'}
+                        </Text>
                       </View>
-                      {q.estado_pago==='pagado'
-                        ?<View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}><Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text></View>
-                        :<TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}><Text style={styles.actionBtnTexto}>Marcar pagado</Text></TouchableOpacity>
+                      {q.estado_pago !== 'pagado' &&
+                        <TouchableOpacity onPress={()=>marcarPagado(q.id)} style={[styles.actionBtn,{backgroundColor:C.accent}]}>
+                          <Text style={styles.actionBtnTexto}>Marcar pagado</Text>
+                        </TouchableOpacity>
+                      }
+                      {q.estado_pago === 'pagado' &&
+                        <View style={[styles.actionBtn,{backgroundColor:'rgba(0,200,151,0.15)',borderWidth:1,borderColor:C.green}]}>
+                          <Text style={[styles.actionBtnTexto,{color:C.green}]}>✅ Pagado</Text>
+                        </View>
                       }
                     </View>
                   </View>
@@ -561,8 +560,13 @@ const styles = StyleSheet.create({
   btnImportarTexto:{color:'#fff',fontWeight:'bold',fontSize:14},
   card:{backgroundColor:C.card,marginBottom:8,borderRadius:12,padding:14,borderWidth:1,borderColor:C.cardBorder},
   cardRow:{flexDirection:'row',alignItems:'center'},
-  cardUser:{fontSize:14,fontWeight:'bold',color:C.text}, cardJornada:{fontSize:11,color:C.accent,marginTop:2}, cardCodigo:{fontSize:11,color:C.textSub,marginTop:2},
-  actionBtn:{paddingHorizontal:12,paddingVertical:7,borderRadius:8,alignItems:'center'}, actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
+  cardUser:{fontSize:14,fontWeight:'bold',color:C.text},
+  cardJornada:{fontSize:11,color:C.accent,marginTop:2},
+  cardCodigo:{fontSize:11,color:C.textSub,marginTop:2},
+  cardEstado:{fontSize:11,marginTop:3,fontWeight:'600'},
+  estadoPagado:{color:C.green}, estadoPendiente:{color:C.orange},
+  actionBtn:{paddingHorizontal:12,paddingVertical:7,borderRadius:8,alignItems:'center'},
+  actionBtnTexto:{color:'#fff',fontSize:12,fontWeight:'600'},
   modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
   modalCard:{backgroundColor:C.card,borderTopLeftRadius:24,borderTopRightRadius:24,padding:24,paddingBottom:34,borderTopWidth:1,borderColor:C.cardBorder},
   modalTitulo:{fontSize:18,fontWeight:'bold',color:C.text,marginBottom:4}, modalSubtitulo:{fontSize:13,color:C.textSub,marginBottom:16},

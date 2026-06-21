@@ -22,7 +22,9 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token)
     if (authError || !user) throw new Error('Token invalido')
 
-    const { nombre, usuario_id, jornada } = await req.json()
+    const { nombre, usuario_id, jornada_id, jornada_nombre } = await req.json()
+    if (!jornada_id) throw new Error('jornada_id requerido')
+
     const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN')
     const appUrl = Deno.env.get('APP_URL') ?? 'https://quinielapro.app'
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -34,7 +36,7 @@ serve(async (req) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        items: [{ title: `Quiniela Pro — Jornada ${jornada}`, quantity: 1, currency_id: 'MXN', unit_price: 100.00 }],
+        items: [{ title: `Quiniela Pro — ${jornada_nombre || jornada_id}`, quantity: 1, currency_id: 'MXN', unit_price: 100.00 }],
         payer: { name: nombre, email: user.email },
         back_urls: {
           success: `${appUrl}/pago/exito`,
@@ -42,26 +44,15 @@ serve(async (req) => {
           pending: `${appUrl}/pago/pendiente`,
         },
         auto_return: 'approved',
-        metadata: { usuario_id, jornada },
-        // URL corregida: webhook-pago (antes decia webhook-mp)
+        metadata: { usuario_id, jornada_id },
         notification_url: `${supabaseUrl}/functions/v1/webhook-pago`,
       })
     })
 
     const mpData = await mpResponse.json()
-    console.log('MP preference creada:', JSON.stringify({ id: mpData.id, sandbox_url: mpData.sandbox_init_point }))
+    console.log('MP preference creada:', JSON.stringify({ id: mpData.id }))
     if (!mpData.id) throw new Error('MP Error: ' + JSON.stringify(mpData))
 
-    // Guardar preference_id en quinielas para poder consultar el estado despues
-    await supabaseClient.from('quinielas').upsert([
-      {
-        usuario_id,
-        jornada,
-        estado_pago: 'pendiente',
-      }
-    ], { onConflict: 'usuario_id,jornada' })
-
-    // En sandbox usar sandbox_init_point, en produccion usar init_point
     const urlPago = mpData.sandbox_init_point || mpData.init_point
 
     return new Response(JSON.stringify({ urlPago }), {
