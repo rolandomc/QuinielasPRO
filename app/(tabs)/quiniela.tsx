@@ -18,7 +18,7 @@ type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
 type Resultado  = '1'|'X'|'2';
 type Marcador   = { local: string; visitante: string };
 
-// ─── Countdown ────────────────────────────────────────────────────────────────
+// ─── Hook generico de cuenta regresiva ──────────────────────────────────────────────
 function useCountdown(fechaISO: string) {
   const calcDiff = () => Math.max(0, new Date(fechaISO).getTime() - Date.now());
   const [ms, setMs] = useState(calcDiff);
@@ -34,6 +34,8 @@ function useCountdown(fechaISO: string) {
   const s = Math.floor((total % 60000) / 1000);
   return { total, d, h, m, s };
 }
+
+// Cuenta regresiva pequeña para cada tarjeta de partido
 function Countdown({ fecha }: { fecha: string }) {
   const { total, d, h, m, s } = useCountdown(fecha);
   if (total <= 0) return null;
@@ -51,6 +53,79 @@ const cdStyles = StyleSheet.create({
   wrapUrgente:{ backgroundColor:'rgba(255,159,67,0.1)', borderColor:'rgba(255,159,67,0.35)' },
   texto:{ color:C.accent, fontSize:11, fontWeight:'700' },
   textoUrgente:{ color:C.orange },
+});
+
+// ─── Banner grande de cuenta regresiva al cierre ─────────────────────────────────
+function BannerCierre({ fechaPrimerPartido, yaGuardo }: { fechaPrimerPartido: string; yaGuardo: boolean }) {
+  const { total, d, h, m, s } = useCountdown(fechaPrimerPartido);
+
+  // Si ya cerró (tiempo = 0) o ya guardó, no mostrar
+  if (total <= 0 || yaGuardo) return null;
+
+  const critico  = total < 3600000;          // menos de 1 hora
+  const urgente  = total < 10800000;         // menos de 3 horas
+  const dias     = d > 0;
+
+  const bloques = dias
+    ? [
+        { valor: String(d).padStart(2,'0'), label: 'DÍAS' },
+        { valor: String(h).padStart(2,'0'), label: 'HRS' },
+        { valor: String(m).padStart(2,'0'), label: 'MIN' },
+      ]
+    : [
+        { valor: String(h).padStart(2,'0'), label: 'HRS' },
+        { valor: String(m).padStart(2,'0'), label: 'MIN' },
+        { valor: String(s).padStart(2,'0'), label: 'SEG' },
+      ];
+
+  const bgColor   = critico  ? 'rgba(255,107,107,0.12)'
+                 : urgente   ? 'rgba(255,159,67,0.10)'
+                 :             'rgba(0,180,216,0.08)';
+  const bdColor   = critico  ? C.red
+                 : urgente   ? C.orange
+                 :             C.accent;
+  const iconColor = critico ? C.red : urgente ? C.orange : C.accent;
+  const numColor  = critico ? C.red : urgente ? C.orange : C.text;
+
+  return (
+    <View style={[bannerStyles.wrap, { backgroundColor: bgColor, borderColor: bdColor }]}>
+      <View style={bannerStyles.topRow}>
+        <Ionicons name={critico ? 'warning' : 'timer-outline'} size={16} color={iconColor} />
+        <Text style={[bannerStyles.titulo, { color: iconColor }]}>
+          {critico ? '⚠️ ¡Última hora! La quiniela cierra pronto'
+          : urgente ? '⏰ La quiniela cierra en menos de 3 horas'
+          :           '📅 Tiempo restante para registrar tu quiniela'}
+        </Text>
+      </View>
+      <View style={bannerStyles.bloquesRow}>
+        {bloques.map((b, i) => (
+          <React.Fragment key={b.label}>
+            <View style={bannerStyles.bloque}>
+              <Text style={[bannerStyles.numero, { color: numColor }]}>{b.valor}</Text>
+              <Text style={[bannerStyles.label, { color: iconColor }]}>{b.label}</Text>
+            </View>
+            {i < bloques.length - 1 && (
+              <Text style={[bannerStyles.separador, { color: numColor }]}>:</Text>
+            )}
+          </React.Fragment>
+        ))}
+      </View>
+      <Text style={[bannerStyles.subtexto, { color: iconColor + 'cc' }]}>
+        Una vez que inicie el primer partido ya no podrás modificar tus selecciones.
+      </Text>
+    </View>
+  );
+}
+const bannerStyles = StyleSheet.create({
+  wrap: { marginHorizontal:16, marginBottom:14, borderRadius:16, borderWidth:1.5, padding:16 },
+  topRow: { flexDirection:'row', alignItems:'center', gap:8, marginBottom:12 },
+  titulo: { fontSize:13, fontWeight:'800', flex:1, lineHeight:18 },
+  bloquesRow: { flexDirection:'row', justifyContent:'center', alignItems:'center', gap:4, marginBottom:10 },
+  bloque: { alignItems:'center', minWidth:56, backgroundColor:'rgba(0,0,0,0.25)', borderRadius:10, paddingVertical:8, paddingHorizontal:10 },
+  numero: { fontSize:34, fontWeight:'900', letterSpacing:1 },
+  label: { fontSize:9, fontWeight:'800', letterSpacing:1.5, marginTop:2 },
+  separador: { fontSize:28, fontWeight:'900', marginBottom:8 },
+  subtexto: { fontSize:11, textAlign:'center', lineHeight:16 },
 });
 
 // ─── Confetti ─────────────────────────────────────────────────────────────────
@@ -167,24 +242,16 @@ function InputMarcador({
           style={[marcadorStyles.input, disabled && marcadorStyles.inputDisabled]}
           value={marcador.local}
           onChangeText={v => onChange({ ...marcador, local: v.replace(/[^0-9]/g, '').slice(0, 2) })}
-          keyboardType="number-pad"
-          maxLength={2}
-          placeholder="0"
-          placeholderTextColor={C.textSub}
-          editable={!disabled}
-          selectTextOnFocus
+          keyboardType="number-pad" maxLength={2} placeholder="0"
+          placeholderTextColor={C.textSub} editable={!disabled} selectTextOnFocus
         />
         <Text style={marcadorStyles.separador}>-</Text>
         <TextInput
           style={[marcadorStyles.input, disabled && marcadorStyles.inputDisabled]}
           value={marcador.visitante}
           onChangeText={v => onChange({ ...marcador, visitante: v.replace(/[^0-9]/g, '').slice(0, 2) })}
-          keyboardType="number-pad"
-          maxLength={2}
-          placeholder="0"
-          placeholderTextColor={C.textSub}
-          editable={!disabled}
-          selectTextOnFocus
+          keyboardType="number-pad" maxLength={2} placeholder="0"
+          placeholderTextColor={C.textSub} editable={!disabled} selectTextOnFocus
         />
       </View>
     </View>
@@ -217,13 +284,14 @@ export default function QuinielaScreen() {
   const [showConfetti, setShowConfetti]         = useState(false);
   const [pagoRecienConfirmado, setPagoRecienConfirmado] = useState(false);
 
-  // Ref para saber si ya se hizo la carga inicial (no repetir al volver a la tab)
   const cargaInicialHecha = useRef(false);
   const prevEstadoRef     = useRef<string | null>(null);
 
-  // ── Carga de partidos y predicciones existentes para una jornada ──
-  // IMPORTANTE: NO toca predicciones/marcadores si el usuario aún no ha guardado
-  // (quiniela === null) para no pisar lo que el usuario está llenando.
+  // Fecha del primer partido (para el banner de cierre)
+  const fechaPrimerPartido = partidos.length > 0
+    ? partidos.reduce((min, p) => p.fecha < min ? p.fecha : min, partidos[0].fecha)
+    : null;
+
   const cargarJornada = useCallback(async (
     j: Jornada,
     opciones?: { forzarPredicciones?: boolean }
@@ -237,7 +305,6 @@ export default function QuinielaScreen() {
       .from('quinielas').select('id,estado_pago,jornada_id')
       .eq('usuario_id', user.id).eq('jornada_id', j.id).maybeSingle();
 
-    // Detectar pago recién confirmado
     if (qData && prevEstadoRef.current === 'pendiente' && qData.estado_pago === 'pagado') {
       setPagoRecienConfirmado(true);
       setShowConfetti(true);
@@ -247,9 +314,6 @@ export default function QuinielaScreen() {
     prevEstadoRef.current = qData?.estado_pago ?? null;
     setQuiniela(qData);
 
-    // Solo cargar predicciones guardadas si:
-    // 1. El usuario ya tiene quiniela guardada en DB, O
-    // 2. Se fuerza explícitamente (primera carga)
     if ((qData && pData) || opciones?.forzarPredicciones) {
       if (pData && pData.length > 0) {
         const { data: predData } = await supabase
@@ -260,7 +324,7 @@ export default function QuinielaScreen() {
         (predData || []).forEach(p => {
           mapRes[p.partido_id] = p.resultado as Resultado;
           mapMarcador[p.partido_id] = {
-            local:    p.goles_local    != null ? String(p.goles_local)    : '',
+            local:     p.goles_local    != null ? String(p.goles_local)    : '',
             visitante: p.goles_visitante != null ? String(p.goles_visitante) : '',
           };
         });
@@ -268,11 +332,8 @@ export default function QuinielaScreen() {
         setMarcadores(mapMarcador);
       }
     }
-    // Si no hay quiniela guardada y no se fuerza, NO tocamos predicciones/marcadores
-    // para preservar lo que el usuario ya seleccionó
   }, [user]);
 
-  // ── Carga inicial completa (jornadas + primera jornada) ──
   const cargarInicial = useCallback(async () => {
     if (!user) return;
     const { data: jData } = await supabase
@@ -293,8 +354,6 @@ export default function QuinielaScreen() {
     }
   }, [user, cargarJornada]);
 
-  // ── Refresh manual: solo refresca jornadas y estado de pago,
-  //    SIN tocar predicciones en curso ──
   const refrescarSinBorrar = useCallback(async () => {
     if (!user) return;
     const { data: jData } = await supabase
@@ -311,7 +370,6 @@ export default function QuinielaScreen() {
       const jActualizada = lista.find(j => j.id === jornada.id);
       if (jActualizada) {
         setJornada(jActualizada);
-        // Solo verifica estado de pago, no sobreescribe predicciones
         const { data: qData } = await supabase
           .from('quinielas').select('id,estado_pago,jornada_id')
           .eq('usuario_id', user.id).eq('jornada_id', jActualizada.id).maybeSingle();
@@ -327,7 +385,6 @@ export default function QuinielaScreen() {
     }
   }, [user, jornada]);
 
-  // ── Carga inicial solo una vez ──
   useEffect(() => {
     if (!user || cargaInicialHecha.current) return;
     cargaInicialHecha.current = true;
@@ -335,22 +392,19 @@ export default function QuinielaScreen() {
     cargarInicial().finally(() => setLoading(false));
   }, [user, cargarInicial]);
 
-  // ── Al volver a la tab: solo verificar estado de pago (sin borrar nada) ──
   useFocusEffect(
     useCallback(() => {
-      if (!cargaInicialHecha.current) return; // primera vez la maneja el useEffect
+      if (!cargaInicialHecha.current) return;
       refrescarSinBorrar();
     }, [refrescarSinBorrar])
   );
 
-  // ── Pull-to-refresh manual ──
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refrescarSinBorrar();
     setRefreshing(false);
   }, [refrescarSinBorrar]);
 
-  // ── Cambiar jornada manualmente ──
   const seleccionarJornada = useCallback(async (j: Jornada) => {
     setJornada(j);
     setPartidos([]);
@@ -385,9 +439,7 @@ export default function QuinielaScreen() {
       const rows = partidos.map(p => {
         const m = marcadores[p.id];
         return {
-          usuario_id: user.id,
-          partido_id: p.id,
-          resultado: predicciones[p.id],
+          usuario_id: user.id, partido_id: p.id, resultado: predicciones[p.id],
           goles_local:     m?.local     !== '' && m?.local     != null ? parseInt(m.local, 10)     : null,
           goles_visitante: m?.visitante !== '' && m?.visitante != null ? parseInt(m.visitante, 10) : null,
         };
@@ -445,7 +497,6 @@ export default function QuinielaScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* HEADER */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.headerTitle}>⚽ Mi Quiniela</Text>
           {jornada?.precio != null && jornada.precio > 0 && (
@@ -458,10 +509,8 @@ export default function QuinielaScreen() {
         </View>
 
         <SelectorQuinielas
-          jornadas={jornadasAbiertas}
-          seleccionada={jornada}
-          onSeleccionar={seleccionarJornada}
-          quinielasUsuario={quinielasUsuario}
+          jornadas={jornadasAbiertas} seleccionada={jornada}
+          onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario}
         />
 
         {jornadasAbiertas.length === 0 && (
@@ -492,6 +541,14 @@ export default function QuinielaScreen() {
                 <Text style={[styles.estadoTexto, { color: C.green }]}>ABIERTA</Text>
               </View>
             </View>
+
+            {/* ⏳ BANNER CUENTA REGRESIVA AL CIERRE */}
+            {fechaPrimerPartido && (
+              <BannerCierre
+                fechaPrimerPartido={fechaPrimerPartido}
+                yaGuardo={yaGuardo}
+              />
+            )}
 
             {premioUsuario != null && premioUsuario > 0 && (
               <View style={styles.bolsaCard}>
@@ -562,8 +619,7 @@ export default function QuinielaScreen() {
                         key={op}
                         style={[styles.opcion, activo && styles.opcionActiva, yaGuardo && { opacity: 0.7 }]}
                         onPress={() => seleccionar(p.id, op)}
-                        disabled={yaGuardo}
-                        activeOpacity={0.7}
+                        disabled={yaGuardo} activeOpacity={0.7}
                       >
                         <Text style={[styles.opcionLetra, activo && styles.opcionLetraActiva]}>{op}</Text>
                         <Text style={[styles.opcionEquipo, activo && styles.opcionEquipoActivo]} numberOfLines={1}>
