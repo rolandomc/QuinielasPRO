@@ -586,6 +586,10 @@ export default function AdminScreen(){
             <Ionicons name="pricetag-outline" size={15} color={C.gold}/>
             <Text style={[styles.detalleBtnTexto,{color:C.gold}]}>{j.precio?`$${j.precio}`:'Precio'}{porcOrg>0?` · ${porcOrg}%`:''}</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/admin-retiros')}>
+            <Ionicons name="wallet-outline" size={20} color={C.accent} />
+            <Text>Retiros</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.detalleBtn,vistaUsuarios
               ?{backgroundColor:C.purpleDim,borderColor:C.purple}
