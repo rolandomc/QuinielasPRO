@@ -107,7 +107,6 @@ export default function AdminScreen(){
   const [loading,setLoading]=useState(true);
   const [syncingByJornada,setSyncingByJornada]=useState<Record<string,boolean>>({});
   const [borrando,setBorrando]=useState<string|null>(null);
-  // toggle vista usuarios/partidos en detalle
   const [vistaUsuarios,setVistaUsuarios]=useState(false);
 
   const [wizardStep,setWizardStep]=useState<WizardStep>(1);
@@ -181,7 +180,7 @@ export default function AdminScreen(){
       else data=await apifb.fixturesPorRound(wLigaId,wTemporada,`Regular Season - ${wRound}`);
       const res:Fixture[]=data.response||[];
       setWFixtures(res);
-      if(!res.length)avisar('Sin partidos',`No se encontraron partidos.`);
+      if(!res.length)avisar('Sin partidos','No se encontraron partidos.');
     }catch(e){avisar('Error',String(e));}
     setWLoadingFix(false);
   };
@@ -212,27 +211,27 @@ export default function AdminScreen(){
       resetWizard();
       setJornadaSel(jData);
       setScreen('jornada_detalle');
-      avisar('\u2705 Quiniela creada',`"${jData.nombre}" lista${wSel.size>0?` con ${wSel.size} partido(s)`:''}${precio?` \u00b7 $${precio} por quiniela`:''}`);
+      avisar('✅ Quiniela creada',`"${jData.nombre}" lista${wSel.size>0?` con ${wSel.size} partido(s)`:''}${precio?` · $${precio} por quiniela`:''}`);
     }catch(e:any){avisar('Error',e.message);}
     setWCreando(false);
   };
 
   const cerrarJornada=(j:Jornada)=>{
-    confirmar('Cerrar jornada',`\u00bfCerrar "${j.nombre}"? Los usuarios ya no podr\u00e1n editar.`,async()=>{
+    confirmar('Cerrar jornada',`¿Cerrar "${j.nombre}"? Los usuarios ya no podrán editar.`,async()=>{
       await supabase.from('jornadas').update({estado:'cerrada'}).eq('id',j.id);
       await supabase.from('partidos').update({cerrado:true}).eq('jornada_id',j.id);
       await cargarDatos();
-      avisar('\u2705 Cerrada',`"${j.nombre}" cerrada.`);
+      avisar('✅ Cerrada',`"${j.nombre}" cerrada.`);
     });
   };
   const finalizarJornada=(j:Jornada)=>{
-    confirmar('Finalizar',`\u00bfMarcar "${j.nombre}" como FINALIZADA?`,async()=>{
+    confirmar('Finalizar',`¿Marcar "${j.nombre}" como FINALIZADA?`,async()=>{
       await supabase.from('jornadas').update({estado:'finalizada'}).eq('id',j.id);
       await cargarDatos();
     });
   };
   const borrarJornada=(j:Jornada)=>{
-    confirmar('\u26a0\ufe0f Borrar',`\u00bfEliminar "${j.nombre}" permanentemente?`,async()=>{
+    confirmar('⚠️ Borrar',`¿Eliminar "${j.nombre}" permanentemente?`,async()=>{
       setBorrando(j.id);
       try{
         const{data:psDB}=await supabase.from('partidos').select('id').eq('jornada_id',j.id);
@@ -243,7 +242,7 @@ export default function AdminScreen(){
         await supabase.from('jornadas').delete().eq('id',j.id);
         await cargarDatos();
         if(jornadaSel?.id===j.id){setJornadaSel(null);setScreen('home');}
-        avisar('\ud83d\uddd1\ufe0f Eliminada',`"${j.nombre}" eliminada.`);
+        avisar('🗑️ Eliminada',`"${j.nombre}" eliminada.`);
       }catch(e:any){avisar('Error',e.message);await cargarDatos();}
       finally{setBorrando(null);}
     });
@@ -256,7 +255,7 @@ export default function AdminScreen(){
       const round=`Regular Season - ${j.api_matchday}`;
       const data=await apifb.fixturesPorRound(j.api_competition_id,j.api_season,round);
       const matches:Fixture[]=data.response||[];
-      if(!matches.length){avisar('Sin datos','La API no devolvi\u00f3 partidos.');return;}
+      if(!matches.length){avisar('Sin datos','La API no devolvió partidos.');return;}
       const ps=partidos.filter(p=>p.jornada_id===j.id&&p.api_fixture_id);
       let actualizados=0;
       for(const p of ps){
@@ -275,7 +274,7 @@ export default function AdminScreen(){
       }
       if(actualizados>0)await recalcularAciertos(j.id);
       await cargarDatos();
-      avisar('\u2705 Sincronizado',`${actualizados} resultado(s) actualizado(s).`);
+      avisar('✅ Sincronizado',`${actualizados} resultado(s) actualizado(s).`);
     }catch(e){avisar('Error',String(e));}
     finally{setSyncingByJornada(prev=>({...prev,[j.id]:false}));}
   };
@@ -341,9 +340,9 @@ export default function AdminScreen(){
   const guardarPrecio=async()=>{
     if(!jornadaPrecioSel)return;
     const precio=parseFloat(precioInput.replace(',','.'));
-    if(isNaN(precio)||precio<0){avisar('Precio inv\u00e1lido','N\u00famero \u2265 0.');return;}
+    if(isNaN(precio)||precio<0){avisar('Precio inválido','Número >= 0.');return;}
     const porcOrg=porcOrgInput!==''?parseInt(porcOrgInput,10):0;
-    if(isNaN(porcOrg)||porcOrg<0||porcOrg>100){avisar('% inv\u00e1lido','Entre 0 y 100.');return;}
+    if(isNaN(porcOrg)||porcOrg<0||porcOrg>100){avisar('% inválido','Entre 0 y 100.');return;}
     setSavingPrecio(true);
     const{error}=await supabase.from('jornadas').update({precio,porcentaje_organizador:porcOrg}).eq('id',jornadaPrecioSel.id);
     setSavingPrecio(false);
@@ -375,24 +374,23 @@ export default function AdminScreen(){
 
   const mostrarNav = screen !== 'crear_quiniela';
 
-  // ─── Wizard ───────────────────────────────────────────────────────────────
   const renderCrearQuiniela=()=>(
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}>
       <WizardIndicator step={wizardStep}/>
       <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}} keyboardShouldPersistTaps="handled">
         {wizardStep===1&&(
           <View>
-            <Text style={styles.wizardTitulo}>\u00bfC\u00f3mo se llama esta quiniela?</Text>
+            <Text style={styles.wizardTitulo}>¿Cómo se llama esta quiniela?</Text>
             <Text style={styles.wizardSub}>Elige un nombre descriptivo para que los participantes la identifiquen.</Text>
-            <TextInput style={[styles.inputGrande]} value={wNombre} onChangeText={setWNombre} placeholder="Ej: Jornada 1 \u00b7 Copa Mundial 2026" placeholderTextColor={C.textMuted} autoFocus maxLength={80}/>
+            <TextInput style={[styles.inputGrande]} value={wNombre} onChangeText={setWNombre} placeholder="Ej: Jornada 1 · Copa Mundial 2026" placeholderTextColor={C.textMuted} autoFocus maxLength={80}/>
             <Text style={{color:C.textMuted,fontSize:11,textAlign:'right',marginTop:-4,marginBottom:16}}>{wNombre.length}/80</Text>
           </View>
         )}
         {wizardStep===2&&(
           <View>
             <Text style={styles.wizardTitulo}>Importa los partidos</Text>
-            <Text style={styles.wizardSub}>Selecciona los partidos de esta quiniela desde la API. Tambi\u00e9n puedes saltarte este paso y agregarlos despu\u00e9s.</Text>
-            <Text style={styles.label}>Liga r\u00e1pida</Text>
+            <Text style={styles.wizardSub}>Selecciona los partidos de esta quiniela desde la API. También puedes saltarte este paso y agregarlos después.</Text>
+            <Text style={styles.label}>Liga rápida</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:8,marginBottom:12}}>
               {LIGAS.map(l=>(
                 <TouchableOpacity key={l.id} style={[styles.ligaChip,wLigaId===l.id&&wTemporada===l.temporada&&styles.ligaChipActiva]} onPress={()=>{setWLigaId(l.id);setWTemporada(l.temporada);}} activeOpacity={0.7}>
@@ -409,11 +407,11 @@ export default function AdminScreen(){
             <View style={{flexDirection:'row',gap:8,marginBottom:10}}>
               {(['jornada','fecha','semana'] as const).map(m=>(
                 <TouchableOpacity key={m} style={[styles.modoBtn,wModo===m&&styles.modoBtnActivo]} onPress={()=>setWModo(m)}>
-                  <Text style={[styles.modoBtnTexto,wModo===m&&{color:C.accent}]}>{m==='jornada'?'Jornada':m==='fecha'?'D\u00eda':'Semana'}</Text>
+                  <Text style={[styles.modoBtnTexto,wModo===m&&{color:C.accent}]}>{m==='jornada'?'Jornada':m==='fecha'?'Día':'Semana'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            {wModo==='jornada'&&<><Text style={styles.label}>N\u00famero de jornada</Text><TextInput style={styles.input} value={wRound} onChangeText={setWRound} keyboardType="number-pad" placeholderTextColor={C.textMuted}/></>}
+            {wModo==='jornada'&&<><Text style={styles.label}>Número de jornada</Text><TextInput style={styles.input} value={wRound} onChangeText={setWRound} keyboardType="number-pad" placeholderTextColor={C.textMuted}/></>}
             {wModo==='fecha'&&<><Text style={styles.label}>Fecha (YYYY-MM-DD)</Text><TextInput style={styles.input} value={wFecha} onChangeText={setWFecha} placeholderTextColor={C.textMuted}/></>}
             {wModo==='semana'&&<><Text style={styles.label}>Desde</Text><TextInput style={styles.input} value={wFechaDesde} onChangeText={setWFechaDesde} placeholderTextColor={C.textMuted}/><Text style={styles.label}>Hasta</Text><TextInput style={styles.input} value={wFechaHasta} onChangeText={setWFechaHasta} placeholderTextColor={C.textMuted}/></>}
             <TouchableOpacity style={[styles.btnSecundarioPrimary,wLoadingFix&&{opacity:0.6}]} onPress={wizardBuscarFixtures} disabled={wLoadingFix} activeOpacity={0.8}>
@@ -422,7 +420,7 @@ export default function AdminScreen(){
             {wFixtures.length>0&&(
               <View style={{marginTop:14}}>
                 <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-                  <Text style={styles.label}>{wFixtures.length} partidos \u2014 <Text style={{color:C.accent}}>{wSel.size} sel.</Text></Text>
+                  <Text style={styles.label}>{wFixtures.length} partidos — <Text style={{color:C.accent}}>{wSel.size} sel.</Text></Text>
                   <TouchableOpacity onPress={()=>wSel.size===wFixtures.length?setWSel(new Set()):setWSel(new Set(wFixtures.map(f=>f.fixture.id)))}>
                     <Text style={{color:C.accent,fontSize:12,fontWeight:'700'}}>{wSel.size===wFixtures.length?'Quitar todos':'Todos'}</Text>
                   </TouchableOpacity>
@@ -448,7 +446,7 @@ export default function AdminScreen(){
         )}
         {wizardStep===3&&(
           <View>
-            <Text style={styles.wizardTitulo}>\u00bfCu\u00e1nto cuesta participar?</Text>
+            <Text style={styles.wizardTitulo}>¿Cuánto cuesta participar?</Text>
             <Text style={styles.wizardSub}>Define el precio y el porcentaje del organizador. El resto va al premio.</Text>
             <View style={styles.resumenCard}>
               <View style={styles.resumenRow}>
@@ -459,7 +457,7 @@ export default function AdminScreen(){
               <View style={[styles.resumenRow,{borderTopWidth:1,borderTopColor:C.cardBorder,marginTop:8,paddingTop:8}]}>
                 <Ionicons name="football-outline" size={16} color={C.accent}/>
                 <Text style={styles.resumenLabel}>Partidos</Text>
-                <Text style={styles.resumenVal}>{wSel.size>0?`${wSel.size} seleccionados`:'Sin partidos (agregar despu\u00e9s)'}</Text>
+                <Text style={styles.resumenVal}>{wSel.size>0?`${wSel.size} seleccionados`:'Sin partidos (agregar después)'}</Text>
               </View>
             </View>
             <Text style={styles.label}>Precio por quiniela (MXN)</Text>
@@ -474,7 +472,7 @@ export default function AdminScreen(){
         {wizardStep>1
           ?<TouchableOpacity style={styles.btnWizardBack} onPress={()=>setWizardStep((wizardStep-1) as WizardStep)}>
               <Ionicons name="arrow-back" size={18} color={C.textSub}/>
-              <Text style={styles.btnWizardBackTexto}>Atr\u00e1s</Text>
+              <Text style={styles.btnWizardBackTexto}>Atrás</Text>
            </TouchableOpacity>
           :<View style={{flex:1}}/>
         }
@@ -506,7 +504,6 @@ export default function AdminScreen(){
     </KeyboardAvoidingView>
   );
 
-  // ─── Detalle jornada ─────────────────────────────────────────────────────
   const renderDetalleJornada=()=>{
     if(!jornadaSel)return null;
     const j=jornadas.find(x=>x.id===jornadaSel.id)||jornadaSel;
@@ -523,18 +520,16 @@ export default function AdminScreen(){
     const bolsaTotal=qJ.reduce((s,q)=>s+(q.monto_cobrado??0),0);
     const porcOrg=j.porcentaje_organizador??0;
     const bolsaPremio=bolsaTotal*((100-porcOrg)/100);
-    // todos los usuarios de esta jornada (pagados y pendientes)
     const qJTodos=quinielas.filter(q=>q.jornada_id===j.id);
     const pagadosJ=qJTodos.filter(q=>q.estado_pago==='pagado');
     const pendientesJ=qJTodos.filter(q=>q.estado_pago!=='pagado');
 
     return(
       <View style={{flex:1}}>
-        {/* Banner titulo */}
         <View style={[styles.detalleBanner,{backgroundColor:eDim,borderBottomColor:eColor+'30'}]}>
           <View style={{flex:1}}>
             <Text style={styles.detalleNombre} numberOfLines={2}>{j.nombre}</Text>
-            <Text style={styles.detalleInfo}>{pJ.length} partidos \u00b7 {conRes}/{pJ.length} resultados{j.precio?` \u00b7 $${j.precio}/c`:''}{porcOrg>0?` \u00b7 ${porcOrg}% org.`:''}</Text>
+            <Text style={styles.detalleInfo}>{pJ.length} partidos · {conRes}/{pJ.length} resultados{j.precio?` · $${j.precio}/c`:''}{porcOrg>0?` · ${porcOrg}% org.`:''}</Text>
           </View>
           <View style={[styles.estadoPill,{backgroundColor:eColor+'20',borderColor:eColor}]}>
             <View style={[styles.estadoDot,{backgroundColor:eColor}]}/>
@@ -542,7 +537,6 @@ export default function AdminScreen(){
           </View>
         </View>
 
-        {/* Bolsa admin (muestra % org) */}
         {bolsaTotal>0&&(
           <View style={styles.bolsaInfoRow}>
             <View style={styles.bolsaInfoItem}>
@@ -562,7 +556,6 @@ export default function AdminScreen(){
           </View>
         )}
 
-        {/* Botones de accion */}
         <View style={styles.detalleAcciones}>
           {isOpen&&(
             <TouchableOpacity style={[styles.detalleBtn,{backgroundColor:C.orangeDim,borderColor:C.orange}]} onPress={()=>cerrarJornada(j)}>
@@ -591,9 +584,8 @@ export default function AdminScreen(){
             setModalPrecio(true);
           }}>
             <Ionicons name="pricetag-outline" size={15} color={C.gold}/>
-            <Text style={[styles.detalleBtnTexto,{color:C.gold}]}>{j.precio?`$${j.precio}`:'Precio'}{porcOrg>0?` \u00b7 ${porcOrg}%`:''}</Text>
+            <Text style={[styles.detalleBtnTexto,{color:C.gold}]}>{j.precio?`$${j.precio}`:'Precio'}{porcOrg>0?` · ${porcOrg}%`:''}</Text>
           </TouchableOpacity>
-          {/* Boton toggle usuarios - enclavado */}
           <TouchableOpacity
             style={[styles.detalleBtn,vistaUsuarios
               ?{backgroundColor:C.purpleDim,borderColor:C.purple}
@@ -602,9 +594,7 @@ export default function AdminScreen(){
             onPress={()=>setVistaUsuarios(v=>!v)}
           >
             <Ionicons name="people" size={15} color={C.purple}/>
-            <Text style={[styles.detalleBtnTexto,{color:C.purple}]}>
-              {qJTodos.length} jugadores
-            </Text>
+            <Text style={[styles.detalleBtnTexto,{color:C.purple}]}>{qJTodos.length} jugadores</Text>
             {vistaUsuarios&&<View style={styles.btnEnclavadoDot}/>}
           </TouchableOpacity>
           <TouchableOpacity style={[styles.detalleBtn,{backgroundColor:C.redDim,borderColor:C.red},esBorrando&&{opacity:0.5}]} onPress={()=>borrarJornada(j)} disabled={esBorrando}>
@@ -612,27 +602,26 @@ export default function AdminScreen(){
           </TouchableOpacity>
         </View>
 
-        {/* VISTA TOGGLE: usuarios o partidos */}
         {vistaUsuarios ? (
           <ScrollView contentContainerStyle={{padding:16,paddingBottom:80}}>
             {qJTodos.length===0&&(
               <View style={styles.emptyCard}>
                 <Ionicons name="people-outline" size={36} color={C.textMuted}/>
-                <Text style={styles.emptyTexto}>Nadie se ha inscrito todav\u00eda.</Text>
+                <Text style={styles.emptyTexto}>Nadie se ha inscrito todavía.</Text>
               </View>
             )}
             {pagadosJ.length>0&&(
               <>
-                <Text style={[styles.seccionTitulo,{color:C.green,marginBottom:8}]}>\u2705 Pagados ({pagadosJ.length})</Text>
+                <Text style={[styles.seccionTitulo,{color:C.green,marginBottom:8}]}>Pagados ({pagadosJ.length})</Text>
                 {pagadosJ.map(q=>(
                   <View key={q.id} style={[styles.usuarioRow,{borderColor:C.green+'40',backgroundColor:C.greenDim}]}>
                     <View style={[styles.usuarioEstadoDot,{backgroundColor:C.green}]}/>
                     <View style={{flex:1}}>
-                      <Text style={styles.usuarioNombre}>{q.usuarios?.nombre||'\u2014'}</Text>
-                      <Text style={styles.usuarioUser}>@{q.usuarios?.username||''}{q.monto_cobrado?` \u00b7 $${q.monto_cobrado}`:''}</Text>
+                      <Text style={styles.usuarioNombre}>{q.usuarios?.nombre||'—'}</Text>
+                      <Text style={styles.usuarioUser}>@{q.usuarios?.username||''}{q.monto_cobrado?` · $${q.monto_cobrado}`:''}</Text>
                     </View>
                     <TouchableOpacity style={[styles.btnTogglePago,{borderColor:C.green,backgroundColor:C.greenDim}]} onPress={()=>marcarPendiente(q.id)}>
-                      <Text style={[styles.btnTogglePagoTexto,{color:C.green}]}>Pagado \u2713</Text>
+                      <Text style={[styles.btnTogglePagoTexto,{color:C.green}]}>Pagado</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -640,12 +629,12 @@ export default function AdminScreen(){
             )}
             {pendientesJ.length>0&&(
               <>
-                <Text style={[styles.seccionTitulo,{color:C.orange,marginBottom:8,marginTop:pagadosJ.length>0?16:0}]}>\u23f3 Pendientes ({pendientesJ.length})</Text>
+                <Text style={[styles.seccionTitulo,{color:C.orange,marginBottom:8,marginTop:pagadosJ.length>0?16:0}]}>Pendientes ({pendientesJ.length})</Text>
                 {pendientesJ.map(q=>(
                   <View key={q.id} style={[styles.usuarioRow,{borderColor:C.orange+'40',backgroundColor:C.orangeDim}]}>
                     <View style={[styles.usuarioEstadoDot,{backgroundColor:C.orange}]}/>
                     <View style={{flex:1}}>
-                      <Text style={styles.usuarioNombre}>{q.usuarios?.nombre||'\u2014'}</Text>
+                      <Text style={styles.usuarioNombre}>{q.usuarios?.nombre||'—'}</Text>
                       <Text style={styles.usuarioUser}>@{q.usuarios?.username||''}</Text>
                     </View>
                     <TouchableOpacity style={[styles.btnTogglePago,{borderColor:C.orange,backgroundColor:C.orangeDim}]} onPress={()=>marcarPagado(q.id,q.jornada_id)}>
@@ -661,7 +650,7 @@ export default function AdminScreen(){
             {pJ.length===0&&(
               <View style={styles.emptyCard}>
                 <Ionicons name="football-outline" size={36} color={C.textMuted}/>
-                <Text style={styles.emptyTexto}>Sin partidos. Usa el bot\u00f3n + para agregar.</Text>
+                <Text style={styles.emptyTexto}>Sin partidos. Usa el botón + para agregar.</Text>
               </View>
             )}
             {pJ.map(p=>{
@@ -696,7 +685,6 @@ export default function AdminScreen(){
     );
   };
 
-  // ─── Home ─────────────────────────────────────────────────────────────────
   const renderHome=()=>(
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:100}}>
       <View style={styles.statsRow}>
@@ -725,9 +713,9 @@ export default function AdminScreen(){
                 <Text style={styles.jornadaNombre} numberOfLines={2}>{j.nombre}</Text>
                 <View style={styles.jornadaMeta}>
                   <Text style={styles.jornadaMetaTexto}>{pJ.length} partidos</Text>
-                  <Text style={styles.jornadaMetaSep}>\u00b7</Text>
+                  <Text style={styles.jornadaMetaSep}>·</Text>
                   <Text style={styles.jornadaMetaTexto}>{qJ.length} quinielas</Text>
-                  <Text style={styles.jornadaMetaSep}>\u00b7</Text>
+                  <Text style={styles.jornadaMetaSep}>·</Text>
                   <Text style={[styles.jornadaMetaTexto,{color:C.green}]}>{pagJ} pagadas</Text>
                 </View>
                 <PulseBar valor={pagJ} max={Math.max(qJ.length,1)} color={C.green}/>
@@ -747,7 +735,7 @@ export default function AdminScreen(){
                 <Text style={styles.jornadaNombre} numberOfLines={1}>{j.nombre}</Text>
                 <View style={styles.jornadaMeta}>
                   <Text style={styles.jornadaMetaTexto}>{qJ.length} quinielas</Text>
-                  {recJ>0&&<><Text style={styles.jornadaMetaSep}>\u00b7</Text><Text style={[styles.jornadaMetaTexto,{color:C.gold}]}>${recJ.toFixed(0)} rec.</Text></>}
+                  {recJ>0&&<><Text style={styles.jornadaMetaSep}>·</Text><Text style={[styles.jornadaMetaTexto,{color:C.gold}]}>${recJ.toFixed(0)} rec.</Text></>}
                 </View>
               </TouchableOpacity>
             );
@@ -757,7 +745,7 @@ export default function AdminScreen(){
       {jornadas.length===0&&(
         <View style={styles.emptyCard}>
           <Ionicons name="trophy-outline" size={48} color={C.textMuted}/>
-          <Text style={styles.emptyTexto}>No hay quinielas todav\u00eda.</Text>
+          <Text style={styles.emptyTexto}>No hay quinielas todavía.</Text>
           <Text style={[styles.emptyTexto,{fontSize:13,marginTop:4}]}>Toca + para crear la primera.</Text>
         </View>
       )}
@@ -774,12 +762,12 @@ export default function AdminScreen(){
             return(
               <View key={q.id} style={styles.quinielaCard}>
                 <View style={{flex:1}}>
-                  <Text style={styles.quinielaNombre}>{q.usuarios?.nombre||'\u2014'}</Text>
-                  <Text style={styles.quinielaUser}>@{q.usuarios?.username||''} \u00b7 {j?.nombre||''}</Text>
-                  {q.codigo&&<Text style={styles.quinielaCodigo}>C\u00f3digo: {q.codigo}</Text>}
+                  <Text style={styles.quinielaNombre}>{q.usuarios?.nombre||'—'}</Text>
+                  <Text style={styles.quinielaUser}>@{q.usuarios?.username||''} · {j?.nombre||''}</Text>
+                  {q.codigo&&<Text style={styles.quinielaCodigo}>Código: {q.codigo}</Text>}
                 </View>
                 <TouchableOpacity style={styles.btnPagar} onPress={()=>marcarPagado(q.id,q.jornada_id)} activeOpacity={0.8}>
-                  <Text style={styles.btnPagarTexto}>Pagado \u2713</Text>
+                  <Text style={styles.btnPagarTexto}>Cobrar</Text>
                 </TouchableOpacity>
               </View>
             );
@@ -790,7 +778,7 @@ export default function AdminScreen(){
       {quinielas.length===0&&(
         <View style={styles.emptyCard}>
           <Ionicons name="people-outline" size={40} color={C.textMuted}/>
-          <Text style={styles.emptyTexto}>No hay quinielas registradas a\u00fan.</Text>
+          <Text style={styles.emptyTexto}>No hay quinielas registradas aún.</Text>
         </View>
       )}
       {jornadas.map(j=>{
@@ -802,20 +790,20 @@ export default function AdminScreen(){
             <TouchableOpacity style={styles.jornadaHeaderRow} onPress={()=>setExpandedJornada(isExp?null:j.id)} activeOpacity={0.8}>
               <View style={{flex:1}}>
                 <Text style={styles.jornadaHeaderNombre} numberOfLines={1}>{j.nombre}</Text>
-                <Text style={styles.jornadaHeaderSub}>{qJ.length} quinielas \u00b7 {qJ.filter(q=>q.estado_pago==='pagado').length} pagadas</Text>
+                <Text style={styles.jornadaHeaderSub}>{qJ.length} quinielas · {qJ.filter(q=>q.estado_pago==='pagado').length} pagadas</Text>
               </View>
               <Ionicons name={isExp?'chevron-up':'chevron-down'} size={18} color={C.textSub}/>
             </TouchableOpacity>
             {isExp&&qJ.map(q=>(
               <View key={q.id} style={[styles.quinielaCard,{marginTop:4}]}>
                 <View style={{flex:1}}>
-                  <Text style={styles.quinielaNombre}>{q.usuarios?.nombre||'\u2014'}</Text>
+                  <Text style={styles.quinielaNombre}>{q.usuarios?.nombre||'—'}</Text>
                   <Text style={styles.quinielaUser}>@{q.usuarios?.username||''}</Text>
-                  {q.codigo&&<Text style={styles.quinielaCodigo}>C\u00f3digo: {q.codigo}</Text>}
+                  {q.codigo&&<Text style={styles.quinielaCodigo}>Código: {q.codigo}</Text>}
                 </View>
                 {q.estado_pago==='pagado'
                   ?<TouchableOpacity style={[styles.btnPagar,{backgroundColor:C.greenDim,borderColor:C.green}]} onPress={()=>marcarPendiente(q.id)} activeOpacity={0.8}>
-                     <Text style={[styles.btnPagarTexto,{color:C.green}]}>Pagado \u2713</Text>
+                     <Text style={[styles.btnPagarTexto,{color:C.green}]}>Pagado</Text>
                    </TouchableOpacity>
                   :<TouchableOpacity style={styles.btnPagar} onPress={()=>marcarPagado(q.id,q.jornada_id)} activeOpacity={0.8}>
                      <Text style={styles.btnPagarTexto}>Cobrar</Text>
@@ -919,7 +907,7 @@ export default function AdminScreen(){
       <View style={styles.modalOverlay}>
         <View style={[styles.modalCard,{maxHeight:'90%'}]}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitulo}>\ud83c\udfc6 Tabla de posiciones</Text>
+            <Text style={styles.modalTitulo}>Tabla de posiciones</Text>
             <TouchableOpacity onPress={()=>setModalGanador(false)}><Ionicons name="close" size={22} color={C.textSub}/></TouchableOpacity>
           </View>
           {calculando&&<ActivityIndicator color={C.gold} size="large" style={{marginVertical:24}}/>}
@@ -927,8 +915,8 @@ export default function AdminScreen(){
             <ScrollView>
               <View style={[styles.ganadorBanner,{backgroundColor:C.goldDim,borderColor:C.gold}]}>
                 {resumenGanador.empate_perfecto
-                  ?<Text style={styles.ganadorTitulo}>\ud83e\udd1d Empate \u2014 premio compartido</Text>
-                  :<Text style={styles.ganadorTitulo}>\ud83e\udd47 {resumenGanador.ganador_nombre}</Text>
+                  ?<Text style={styles.ganadorTitulo}>Empate — premio compartido</Text>
+                  :<Text style={styles.ganadorTitulo}>{resumenGanador.ganador_nombre}</Text>
                 }
                 <Text style={styles.ganadorPremio}>Premio: ${resumenGanador.premio_por_ganador.toFixed(2)}{resumenGanador.empate_perfecto?' c/u':''}</Text>
                 <View style={{flexDirection:'row',gap:16,marginTop:4}}>
@@ -936,16 +924,15 @@ export default function AdminScreen(){
                   <Text style={styles.ganadorSub}>Org. {resumenGanador.porcentaje_organizador}%: ${(resumenGanador.bolsa_total-resumenGanador.bolsa_premio).toFixed(2)}</Text>
                 </View>
               </View>
-              {resumenGanador.posiciones.map(pos=>{
-                const medals=['\ud83e\udd47','\ud83e\udd48','\ud83e\udd49'];
-                const medal=pos.posicion<=3?medals[pos.posicion-1]:null;
+              {resumenGanador.posiciones.map((pos,idx)=>{
                 const isGanador=pos.premio_ganado>0;
+                const medalLabel = idx===0 ? '1er' : idx===1 ? '2do' : idx===2 ? '3er' : String(pos.posicion);
                 return(
                   <View key={pos.quiniela_id} style={[styles.posRow,isGanador&&{backgroundColor:C.goldDim,borderColor:C.gold+'60'}]}>
-                    <Text style={styles.posNum}>{medal||pos.posicion}</Text>
+                    <Text style={styles.posNum}>{medalLabel}</Text>
                     <View style={{flex:1,marginLeft:10}}>
                       <Text style={[styles.posNombre,isGanador&&{color:C.gold}]}>{pos.nombre}</Text>
-                      <Text style={styles.posSub}>{pos.aciertos} aciertos{pos.diferencia_goles!=null?` \u00b7 \u0394goles: ${pos.diferencia_goles}`:''}</Text>
+                      <Text style={styles.posSub}>{pos.aciertos} aciertos{pos.diferencia_goles!=null?` · Δgoles: ${pos.diferencia_goles}`:''}</Text>
                     </View>
                     {pos.premio_ganado>0&&(
                       <View style={styles.posPremio}>
@@ -996,18 +983,15 @@ export default function AdminScreen(){
 
       {mostrarNav&&(
         <View style={[styles.bottomNav,{paddingBottom:insets.bottom+4}]}>
-          {/* Tab Quinielas (antes Inicio) */}
           <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('home')} activeOpacity={0.7}>
             <Ionicons name="football" size={22} color={screen==='home'?C.accent:C.textMuted}/>
             <Text style={[styles.navTabLabel,screen==='home'&&{color:C.accent}]}>Quinielas</Text>
           </TouchableOpacity>
-          {/* Boton central + */}
           <TouchableOpacity style={[styles.navTab,styles.navTabCenter]} onPress={abrirCrear} activeOpacity={0.7}>
             <View style={styles.navAddBtn}>
               <Ionicons name="add" size={26} color="#fff"/>
             </View>
           </TouchableOpacity>
-          {/* Tab Ingresos */}
           <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('ingresos')} activeOpacity={0.7}>
             <Ionicons name="bar-chart-outline" size={22} color={screen==='ingresos'?C.accent:C.textMuted}/>
             <Text style={[styles.navTabLabel,screen==='ingresos'&&{color:C.accent}]}>Ingresos</Text>
@@ -1087,7 +1071,6 @@ const styles = StyleSheet.create({
   resBadge:{paddingHorizontal:8,paddingVertical:2,borderRadius:8},
   resBadgeTexto:{fontSize:12,fontWeight:'800'},
   partidoFecha:{fontSize:11,color:C.textMuted},
-  // filas de usuarios en toggle
   usuarioRow:{flexDirection:'row',alignItems:'center',gap:10,borderRadius:12,borderWidth:1,padding:12,marginBottom:6},
   usuarioEstadoDot:{width:8,height:8,borderRadius:4,flexShrink:0},
   usuarioNombre:{fontSize:14,fontWeight:'700',color:C.text},
@@ -1111,7 +1094,7 @@ const styles = StyleSheet.create({
   ganadorPremio:{fontSize:22,fontWeight:'900',color:C.green,marginTop:4},
   ganadorSub:{fontSize:12,color:C.textSub},
   posRow:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:12,marginBottom:6},
-  posNum:{fontSize:20,width:32,textAlign:'center'},
+  posNum:{fontSize:14,fontWeight:'700',color:C.textSub,width:32,textAlign:'center'},
   posNombre:{fontSize:14,fontWeight:'700',color:C.text},
   posSub:{fontSize:12,color:C.textSub,marginTop:2},
   posPremio:{backgroundColor:C.greenDim,borderRadius:8,borderWidth:1,borderColor:C.green,paddingHorizontal:10,paddingVertical:4},
