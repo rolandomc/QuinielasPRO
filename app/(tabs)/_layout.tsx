@@ -36,9 +36,10 @@ export default function TabsLayout() {
         headerShown: false,
       }}
     >
-      <Tabs.Screen name="quiniela"   options={{ title: 'Quiniela',   tabBarIcon: ({ focused }) => <TabIcon name="football"  focused={focused} activeColor={colors.accent}/> }} />
-      <Tabs.Screen name="resultados" options={{ title: 'Resultados', tabBarIcon: ({ focused }) => <TabIcon name="trophy"    focused={focused} activeColor={colors.accent}/> }} />
-      <Tabs.Screen name="perfil"     options={{ title: 'Perfil',     tabBarIcon: ({ focused }) => <TabIcon name="person"    focused={focused} activeColor={colors.accent}/> }} />
+      <Tabs.Screen name="quiniela"   options={{ title: 'Quiniela',   tabBarIcon: ({ focused }) => <TabIcon name="football"     focused={focused} activeColor={colors.accent}/> }} />
+      <Tabs.Screen name="resultados" options={{ title: 'Resultados', tabBarIcon: ({ focused }) => <TabIcon name="trophy"       focused={focused} activeColor={colors.accent}/> }} />
+      <Tabs.Screen name="billetera"  options={{ title: 'Billetera',  tabBarIcon: ({ focused }) => <TabIcon name="wallet"       focused={focused} activeColor={colors.accent}/> }} />
+      <Tabs.Screen name="perfil"     options={{ title: 'Perfil',     tabBarIcon: ({ focused }) => <TabIcon name="person"       focused={focused} activeColor={colors.accent}/> }} />
     </Tabs>
   );
 }
