@@ -26,11 +26,17 @@ create index if not exists idx_retiros_creado   on public.solicitudes_retiro(cre
 -- RLS
 alter table public.solicitudes_retiro enable row level security;
 
+-- Drop policies si ya existen (idempotente)
+drop policy if exists "usuario_ve_sus_retiros"   on public.solicitudes_retiro;
+drop policy if exists "usuario_inserta_retiros"  on public.solicitudes_retiro;
+drop policy if exists "admin_ve_todos_retiros"   on public.solicitudes_retiro;
+drop policy if exists "admin_actualiza_retiros"  on public.solicitudes_retiro;
+
 -- Usuario sólo ve sus propias solicitudes
 create policy "usuario_ve_sus_retiros" on public.solicitudes_retiro
   for select using (auth.uid() = usuario_id);
 
--- Usuario sólo puede insertar las suyas (y sólo si no hay otra pendiente)
+-- Usuario sólo puede insertar las suyas
 create policy "usuario_inserta_retiros" on public.solicitudes_retiro
   for insert with check (auth.uid() = usuario_id);
 
@@ -70,7 +76,6 @@ end $$;
 
 -- ============================================================
 -- FUNCIÓN: solicitar_retiro
--- Llama el usuario desde la app. Descuenta saldo y crea solicitud.
 -- ============================================================
 create or replace function public.solicitar_retiro(
   p_monto          numeric,
@@ -89,7 +94,6 @@ declare
   v_saldo_actual numeric;
   v_retiro_id   uuid;
 begin
-  -- Validaciones básicas
   if p_monto <= 0 then
     raise exception 'El monto debe ser mayor a 0.';
   end if;
@@ -97,7 +101,6 @@ begin
     raise exception 'Debes proporcionar CLABE o número de tarjeta.';
   end if;
 
-  -- Verificar que no tenga ya una solicitud pendiente
   if exists (
     select 1 from solicitudes_retiro
     where usuario_id = v_uid and estado = 'pendiente'
@@ -105,7 +108,6 @@ begin
     raise exception 'Ya tienes una solicitud de retiro pendiente.';
   end if;
 
-  -- Verificar saldo suficiente y descontarlo (en una sola operación atómica)
   update usuarios
   set saldo = saldo - p_monto
   where id = v_uid and saldo >= p_monto
@@ -115,7 +117,6 @@ begin
     raise exception 'Saldo insuficiente para realizar el retiro.';
   end if;
 
-  -- Crear la solicitud
   insert into solicitudes_retiro (
     usuario_id, monto, nombre_titular, banco, clabe, numero_tarjeta
   ) values (
@@ -128,8 +129,6 @@ $$;
 
 -- ============================================================
 -- FUNCIÓN: resolver_retiro
--- Llama el admin desde la app. Aprueba o rechaza.
--- Si rechaza → devuelve el saldo al usuario.
 -- ============================================================
 create or replace function public.resolver_retiro(
   p_retiro_id uuid,
@@ -142,10 +141,9 @@ security definer
 set search_path = public
 as $$
 declare
-  v_retiro  solicitudes_retiro;
+  v_retiro   solicitudes_retiro;
   v_es_admin boolean;
 begin
-  -- Verificar que quien llama es admin
   select es_admin into v_es_admin
   from usuarios where id = auth.uid();
 
@@ -153,7 +151,6 @@ begin
     raise exception 'No tienes permisos de administrador.';
   end if;
 
-  -- Obtener la solicitud (bloquear fila)
   select * into v_retiro
   from solicitudes_retiro
   where id = p_retiro_id
@@ -164,24 +161,20 @@ begin
   end if;
 
   if v_retiro.estado <> 'pendiente' then
-    raise exception 'Esta solicitud ya fue resuelta (estado: %).' , v_retiro.estado;
+    raise exception 'Esta solicitud ya fue resuelta (estado: %).', v_retiro.estado;
   end if;
 
   if p_aprobar then
-    -- Marcar como aprobado
     update solicitudes_retiro
-    set estado       = 'aprobado',
-        nota_admin   = p_nota,
-        resuelto_en  = now()
+    set estado      = 'aprobado',
+        nota_admin  = p_nota,
+        resuelto_en = now()
     where id = p_retiro_id;
-
-    -- El saldo ya fue descontado al crear la solicitud → no hacer nada más.
   else
-    -- Rechazar → devolver saldo al usuario
     update solicitudes_retiro
-    set estado       = 'rechazado',
-        nota_admin   = p_nota,
-        resuelto_en  = now()
+    set estado      = 'rechazado',
+        nota_admin  = p_nota,
+        resuelto_en = now()
     where id = p_retiro_id;
 
     update usuarios
@@ -191,6 +184,6 @@ begin
 end;
 $$;
 
--- Dar permiso de ejecución a usuarios autenticados
+-- Permisos
 grant execute on function public.solicitar_retiro to authenticated;
 grant execute on function public.resolver_retiro  to authenticated;
