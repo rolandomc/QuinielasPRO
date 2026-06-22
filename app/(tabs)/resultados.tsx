@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { apifb } from '../../lib/apiFootball';
@@ -50,23 +51,24 @@ export default function ResultadosScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
 
-  const [tab, setTab]               = useState<TabRes>('quiniela');
-  const [quinielas, setQuinielas]   = useState<Jornada[]>([]);
+  const [tab, setTab]                 = useState<TabRes>('quiniela');
+  const [quinielas, setQuinielas]     = useState<Jornada[]>([]);
   const [quinielaSel, setQuinielaSel] = useState<Jornada | null>(null);
-  const [posiciones, setPosiciones] = useState<Posicion[]>([]);
-  const [partidos, setPartidos]     = useState<Partido[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [miPosicion, setMiPosicion] = useState<number | null>(null);
-  const [liveScores, setLiveScores] = useState<Record<number, LiveScore>>({});
-  const [liveActivo, setLiveActivo] = useState(false);
-  const [rankHist, setRankHist]     = useState<RankHist[]>([]);
+  const [posiciones, setPosiciones]   = useState<Posicion[]>([]);
+  const [partidos, setPartidos]       = useState<Partido[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [miPosicion, setMiPosicion]   = useState<number | null>(null);
+  const [liveScores, setLiveScores]   = useState<Record<number, LiveScore>>({});
+  const [liveActivo, setLiveActivo]   = useState(false);
+  const [rankHist, setRankHist]       = useState<RankHist[]>([]);
   const [loadingHist, setLoadingHist] = useState(false);
 
-  const partidosRef = useRef<Partido[]>([]);
-  const pollingRef  = useRef<any>(null);
+  const partidosRef       = useRef<Partido[]>([]);
+  const pollingRef        = useRef<any>(null);
+  const cargaInicialHecha = useRef(false);
 
-  // ── fetchLive: consulta la API para TODOS los partidos con api_fixture_id ──
+  // ── Live polling ──────────────────────────────────────────────────────────
   const fetchLive = useCallback(async (ps: Partido[]) => {
     const conApi = ps.filter(p => p.api_fixture_id);
     if (conApi.length === 0) { setLiveActivo(false); return; }
@@ -94,37 +96,50 @@ export default function ResultadosScreen() {
     partidosRef.current = ps;
     const conApi = ps.filter(p => p.api_fixture_id);
     if (conApi.length === 0) { setLiveActivo(false); return; }
-    // Fetch inmediato
     fetchLive(ps);
-    // Polling cada 45s mientras la pantalla esté activa
     pollingRef.current = setInterval(() => fetchLive(partidosRef.current), 45000);
   }, [fetchLive]);
 
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
-  // ── cargar quiniela (jornadas cerradas o finalizadas) ──
-  const cargar = useCallback(async (q?: Jornada) => {
-    setLoading(true);
-    // Solo jornadas cerradas y finalizadas — CERRADA es donde ocurren los partidos en vivo
+  // ── Carga principal ───────────────────────────────────────────────────────
+  // Solo muestra jornadas con estado 'cerrada' (en curso, partidos vivos).
+  // Las 'finalizadas' ya tienen ganador y se ocultan de esta pestaña.
+  const cargar = useCallback(async (jornadaForzada?: Jornada) => {
+    if (!user) return;
     const { data: jData } = await supabase
-      .from('jornadas').select('id,nombre,estado')
-      .in('estado', ['cerrada', 'finalizada'])
+      .from('jornadas')
+      .select('id,nombre,estado')
+      .eq('estado', 'cerrada')           // ← SOLO cerradas (en curso)
       .order('creado_at', { ascending: false });
+
     const lista: Jornada[] = jData || [];
     setQuinielas(lista);
-    const actual = q ?? lista[0] ?? null;
+
+    const actual = jornadaForzada ?? lista[0] ?? null;
     setQuinielaSel(actual);
-    if (!actual) { setLoading(false); setRefreshing(false); return; }
+
+    if (!actual) {
+      setPartidos([]);
+      setPosiciones([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
     const { data: pData } = await supabase
-      .from('partidos').select('id,local,visitante,resultado_final,jornada_id,api_fixture_id')
-      .eq('jornada_id', actual.id).order('fecha');
+      .from('partidos')
+      .select('id,local,visitante,resultado_final,jornada_id,api_fixture_id')
+      .eq('jornada_id', actual.id)
+      .order('fecha');
     const ps: Partido[] = pData || [];
     setPartidos(ps);
 
     const { data: qData } = await supabase
-      .from('quinielas').select('usuario_id,aciertos,usuarios(username,nombre)')
-      .eq('jornada_id', actual.id).eq('estado_pago', 'pagado')
+      .from('quinielas')
+      .select('usuario_id,aciertos,usuarios(username,nombre)')
+      .eq('jornada_id', actual.id)
+      .eq('estado_pago', 'pagado')
       .order('aciertos', { ascending: false });
     const tabla: Posicion[] = (qData || []).map((q: any) => ({
       usuario_id: q.usuario_id,
@@ -137,15 +152,35 @@ export default function ResultadosScreen() {
       const pos = tabla.findIndex(p => p.usuario_id === user.id);
       setMiPosicion(pos >= 0 ? pos + 1 : null);
     }
-    // Iniciar polling live — funciona en estado 'cerrada' donde los partidos ya empezaron
     iniciarPolling(ps);
     setLoading(false);
     setRefreshing(false);
   }, [user, iniciarPolling]);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  // Carga inicial una sola vez
+  useEffect(() => {
+    if (!user || cargaInicialHecha.current) return;
+    cargaInicialHecha.current = true;
+    setLoading(true);
+    cargar();
+  }, [user, cargar]);
 
-  // ── Ranking histórico ──
+  // Al volver a la pestaña refresca silenciosamente
+  useFocusEffect(
+    useCallback(() => {
+      if (!cargaInicialHecha.current) return;
+      cargar(quinielaSel ?? undefined);
+    }, [cargar, quinielaSel])
+  );
+
+  // Pull-to-refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    cargar(quinielaSel ?? undefined);
+  }, [cargar, quinielaSel]);
+
+  // ── Ranking histórico ─────────────────────────────────────────────────────
+  // El histórico SÍ usa jornadas 'finalizadas' (ya terminaron y tienen ganador)
   const cargarHistorico = useCallback(async () => {
     setLoadingHist(true);
     const { data: qAll } = await supabase
@@ -154,7 +189,7 @@ export default function ResultadosScreen() {
       .eq('estado_pago', 'pagado');
     if (!qAll) { setLoadingHist(false); return; }
     const { data: jAll } = await supabase
-      .from('jornadas').select('id').in('estado', ['cerrada', 'finalizada']);
+      .from('jornadas').select('id').eq('estado', 'finalizada'); // solo finalizadas
     const jIds = new Set((jAll || []).map((j: any) => j.id));
     const mapaUser: Record<string, RankHist> = {};
     for (const q of qAll) {
@@ -187,7 +222,7 @@ export default function ResultadosScreen() {
     setLoadingHist(false);
   }, []);
 
-  useEffect(() => { if (tab === 'historico') cargarHistorico(); }, [tab]);
+  useEffect(() => { if (tab === 'historico') cargarHistorico(); }, [tab, cargarHistorico]);
 
   const hayResultados = partidos.some(p => p.resultado_final);
   const medallaColor  = (i: number) => i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : C.textSub;
@@ -204,10 +239,8 @@ export default function ResultadosScreen() {
     const visitanteGana = resEfectivo === '2';
     const empate        = resEfectivo === 'X';
     const mostrarGoles  = enVivo || finalizado;
-
     return (
       <View key={p.id} style={[styles.partidoCard, enVivo && styles.partidoCardLive]}>
-        {/* Banner LIVE con punto rojo parpadeante */}
         {enVivo && (
           <View style={styles.liveBanner}>
             <LiveDot />
@@ -219,23 +252,14 @@ export default function ResultadosScreen() {
           </View>
         )}
         <View style={styles.partidoRow}>
-          {/* Local */}
           <View style={[styles.equipoBox, localGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
-            <Text style={[styles.equipoNombre, localGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>
-              {p.local}
-            </Text>
+            <Text style={[styles.equipoNombre, localGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.local}</Text>
             {mostrarGoles && golesHome !== null && (
-              <Text style={[styles.goles, localGana && { color: C.green }, empate && { color: C.orange }]}>
-                {golesHome}
-              </Text>
+              <Text style={[styles.goles, localGana && { color: C.green }, empate && { color: C.orange }]}>{golesHome}</Text>
             )}
           </View>
-
-          {/* Centro */}
           <View style={styles.centroCol}>
-            {!enVivo && !finalizado && (
-              <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>VS</Text></View>
-            )}
+            {!enVivo && !finalizado && <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>VS</Text></View>}
             {enVivo && <Text style={styles.vsLive}>:</Text>}
             {finalizado && !enVivo && (
               <View style={empate ? styles.empateBadge : styles.ftBadge}>
@@ -243,16 +267,10 @@ export default function ResultadosScreen() {
               </View>
             )}
           </View>
-
-          {/* Visitante */}
           <View style={[styles.equipoBox, visitanteGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
-            <Text style={[styles.equipoNombre, visitanteGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>
-              {p.visitante}
-            </Text>
+            <Text style={[styles.equipoNombre, visitanteGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.visitante}</Text>
             {mostrarGoles && golesAway !== null && (
-              <Text style={[styles.goles, visitanteGana && { color: C.green }, empate && { color: C.orange }]}>
-                {golesAway}
-              </Text>
+              <Text style={[styles.goles, visitanteGana && { color: C.green }, empate && { color: C.orange }]}>{golesAway}</Text>
             )}
           </View>
         </View>
@@ -266,11 +284,7 @@ export default function ResultadosScreen() {
       <ScrollView
         style={styles.scroll}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); cargar(quinielaSel ?? undefined); }}
-            tintColor={C.accent} colors={[C.accent]}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -295,26 +309,19 @@ export default function ResultadosScreen() {
 
         {/* Tabs */}
         <View style={styles.tabsRow}>
-          <TouchableOpacity
-            style={[styles.tabBtn, tab === 'quiniela' && styles.tabActivo]}
-            onPress={() => setTab('quiniela')} activeOpacity={0.8}
-          >
+          <TouchableOpacity style={[styles.tabBtn, tab === 'quiniela' && styles.tabActivo]} onPress={() => setTab('quiniela')} activeOpacity={0.8}>
             <Ionicons name="trophy-outline" size={14} color={tab === 'quiniela' ? C.accent : C.textSub} />
-            <Text style={[styles.tabTexto, tab === 'quiniela' && styles.tabTextoActivo]}>Quiniela</Text>
+            <Text style={[styles.tabTexto, tab === 'quiniela' && styles.tabTextoActivo]}>En Curso</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, tab === 'historico' && styles.tabActivo]}
-            onPress={() => setTab('historico')} activeOpacity={0.8}
-          >
+          <TouchableOpacity style={[styles.tabBtn, tab === 'historico' && styles.tabActivo]} onPress={() => setTab('historico')} activeOpacity={0.8}>
             <Ionicons name="bar-chart-outline" size={14} color={tab === 'historico' ? C.accent : C.textSub} />
             <Text style={[styles.tabTexto, tab === 'historico' && styles.tabTextoActivo]}>Ranking Global</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ─ TAB QUINIELA ─ */}
+        {/* ─ TAB EN CURSO ─ */}
         {tab === 'quiniela' && (
           <>
-            {/* Selector de quiniela (cuando hay más de una) */}
             {quinielas.length > 1 && (
               <ScrollView
                 horizontal showsHorizontalScrollIndicator={false}
@@ -325,85 +332,85 @@ export default function ResultadosScreen() {
                   <TouchableOpacity
                     key={q.id}
                     style={[styles.quinielaBtn, quinielaSel?.id === q.id && styles.quinielaBtnActivo]}
-                    onPress={() => cargar(q)} activeOpacity={0.7}
+                    onPress={() => { setQuinielaSel(q); cargar(q); }}
+                    activeOpacity={0.7}
                   >
-                    <Text
-                      style={[styles.quinielaTexto, quinielaSel?.id === q.id && styles.quinielaTextoActivo]}
-                      numberOfLines={1}
-                    >
+                    <Text style={[styles.quinielaTexto, quinielaSel?.id === q.id && styles.quinielaTextoActivo]} numberOfLines={1}>
                       {q.nombre}
                     </Text>
-                    {q.estado === 'cerrada' && (
-                      <View style={styles.cerradaBadge}>
-                        <Text style={styles.cerradaTexto}>EN CURSO</Text>
-                      </View>
-                    )}
+                    <View style={styles.cerradaBadge}>
+                      <Text style={styles.cerradaTexto}>EN CURSO</Text>
+                    </View>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-            )}
-
-            {/* Partidos de la quiniela seleccionada */}
-            {partidos.length > 0 && (
-              <View style={styles.seccion}>
-                <View style={styles.seccionHeaderRow}>
-                  <Text style={styles.seccionTitulo}>⚽ {quinielaSel?.nombre}</Text>
-                  {quinielaSel?.estado === 'cerrada' && (
-                    <View style={styles.enCursoBadge}>
-                      <LiveDot />
-                      <Text style={styles.enCursoTexto}>En curso</Text>
-                    </View>
-                  )}
-                </View>
-                {partidos.map(renderPartido)}
-              </View>
             )}
 
             {loading ? (
               <ActivityIndicator color={C.accent} style={{ margin: 40 }} />
             ) : quinielas.length === 0 ? (
               <View style={styles.emptyBox}>
-                <Text style={{ fontSize: 48, marginBottom: 12 }}>⏰</Text>
-                <Text style={styles.emptyTitulo}>Sin quinielas cerradas</Text>
-                <Text style={styles.emptyTexto}>Los resultados aparecerán cuando el admin cierre una quiniela.</Text>
-              </View>
-            ) : !hayResultados && Object.keys(liveScores).length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={{ fontSize: 48, marginBottom: 12 }}>⏰</Text>
-                <Text style={styles.emptyTitulo}>Partidos por comenzar</Text>
-                <Text style={styles.emptyTexto}>Los marcadores aparecerán cuando inicien los partidos.</Text>
-              </View>
-            ) : posiciones.length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={styles.emptyTexto}>No hay pronósticos con pago confirmado.</Text>
+                <Text style={{ fontSize: 48, marginBottom: 12 }}>⚽</Text>
+                <Text style={styles.emptyTitulo}>No hay quinielas en curso</Text>
+                <Text style={styles.emptyTexto}>
+                  Los resultados en vivo aparecen cuando el admin cierra una jornada.{`\n`}
+                  Las jornadas finalizadas aparecen en el Ranking Global.
+                </Text>
               </View>
             ) : (
-              <View style={styles.tablaWrap}>
-                <View style={styles.tablaHeader}>
-                  <Text style={[styles.col, styles.colNum]}>#</Text>
-                  <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
-                  <Text style={[styles.col, styles.colAciertos]}>Aciertos</Text>
-                </View>
-                {posiciones.map((p, i) => (
-                  <View key={p.usuario_id} style={[styles.tablaRow, p.usuario_id === user?.id && styles.rowMio]}>
-                    <Text style={[styles.col, styles.colNum, { color: medallaColor(i), fontSize: i < 3 ? 20 : 14, fontWeight: 'bold' }]}>
-                      {medalla(i)}
-                    </Text>
-                    <Text style={[styles.col, styles.colNombre, p.usuario_id === user?.id && { color: C.accent }]} numberOfLines={1}>
-                      {p.username}{p.usuario_id === user?.id ? ' ★' : ''}
-                    </Text>
-                    <View style={styles.colAciertosWrap}>
-                      <Text style={styles.aciertosNum}>{p.aciertos}</Text>
-                      <Text style={styles.aciertosTotal}>/{p.total_partidos}</Text>
+              <>
+                {partidos.length > 0 && (
+                  <View style={styles.seccion}>
+                    <View style={styles.seccionHeaderRow}>
+                      <Text style={styles.seccionTitulo}>⚽ {quinielaSel?.nombre}</Text>
+                      <View style={styles.enCursoBadge}>
+                        <LiveDot />
+                        <Text style={styles.enCursoTexto}>En curso</Text>
+                      </View>
                     </View>
+                    {partidos.map(renderPartido)}
                   </View>
-                ))}
-              </View>
+                )}
+
+                {!hayResultados && Object.keys(liveScores).length === 0 ? (
+                  <View style={styles.emptyBox}>
+                    <Text style={{ fontSize: 48, marginBottom: 12 }}>⏰</Text>
+                    <Text style={styles.emptyTitulo}>Partidos por comenzar</Text>
+                    <Text style={styles.emptyTexto}>Los marcadores aparecerán cuando inicien los partidos.</Text>
+                  </View>
+                ) : posiciones.length === 0 ? (
+                  <View style={styles.emptyBox}>
+                    <Text style={styles.emptyTexto}>No hay pronósticos con pago confirmado.</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.tablaWrap, { paddingHorizontal: 16 }]}>
+                    <View style={styles.tablaHeader}>
+                      <Text style={[styles.col, styles.colNum]}>#</Text>
+                      <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
+                      <Text style={[styles.col, styles.colAciertos]}>Aciertos</Text>
+                    </View>
+                    {posiciones.map((p, i) => (
+                      <View key={p.usuario_id} style={[styles.tablaRow, p.usuario_id === user?.id && styles.rowMio]}>
+                        <Text style={[styles.col, styles.colNum, { color: medallaColor(i), fontSize: i < 3 ? 20 : 14, fontWeight: 'bold' }]}>
+                          {medalla(i)}
+                        </Text>
+                        <Text style={[styles.col, styles.colNombre, p.usuario_id === user?.id && { color: C.accent }]} numberOfLines={1}>
+                          {p.username}{p.usuario_id === user?.id ? ' ★' : ''}
+                        </Text>
+                        <View style={styles.colAciertosWrap}>
+                          <Text style={styles.aciertosNum}>{p.aciertos}</Text>
+                          <Text style={styles.aciertosTotal}>/{p.total_partidos}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
             )}
           </>
         )}
 
-        {/* ─ TAB HISTÓRICO ─ */}
+        {/* ─ TAB RANKING GLOBAL (solo finalizadas) ─ */}
         {tab === 'historico' && (
           <View style={{ paddingHorizontal: 16 }}>
             {loadingHist ? (
@@ -501,14 +508,13 @@ const styles = StyleSheet.create({
   quinielaBtnActivo: { backgroundColor: C.accentDim, borderColor: C.accent },
   quinielaTexto: { color: C.textSub, fontWeight: '700', fontSize: 12 },
   quinielaTextoActivo: { color: C.accent },
-  cerradaBadge: { backgroundColor: 'rgba(255,107,107,0.12)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
-  cerradaTexto: { color: C.red, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  cerradaBadge: { backgroundColor: 'rgba(0,180,216,0.1)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
+  cerradaTexto: { color: C.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   seccion: { backgroundColor: C.card, marginHorizontal: 16, marginBottom: 12, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.cardBorder },
   seccionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   seccionTitulo: { color: C.text, fontWeight: 'bold', fontSize: 15 },
   enCursoBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,107,107,0.1)', borderWidth: 1, borderColor: C.red, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   enCursoTexto: { color: C.red, fontSize: 10, fontWeight: '800' },
-  // Tarjeta de partido
   partidoCard: { borderRadius: 12, marginBottom: 10, overflow: 'hidden', borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: '#12121f' },
   partidoCardLive: { borderColor: C.red, shadowColor: C.red, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } },
   liveBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,107,107,0.12)', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,107,107,0.2)' },
@@ -532,8 +538,8 @@ const styles = StyleSheet.create({
   pendienteTexto: { color: C.textSub, fontSize: 12, textAlign: 'center', fontWeight: '700' },
   emptyBox: { alignItems: 'center', padding: 50 },
   emptyTitulo: { fontSize: 16, fontWeight: 'bold', color: C.text, marginBottom: 8 },
-  emptyTexto: { color: C.textSub, fontSize: 13, textAlign: 'center' },
-  tablaWrap: { marginHorizontal: 0, marginBottom: 12 },
+  emptyTexto: { color: C.textSub, fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  tablaWrap: { marginBottom: 12 },
   tablaHeader: { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4 },
   tablaRow: { flexDirection: 'row', backgroundColor: C.card, padding: 14, borderRadius: 12, marginBottom: 6, borderWidth: 1, borderColor: C.cardBorder, alignItems: 'center' },
   rowMio: { borderColor: C.accent, backgroundColor: C.accentDim },
