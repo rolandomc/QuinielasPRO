@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { useFocusEffect } from 'expo-router';
 
 const C = { bg:'#0d0d1a', card:'#161625', cardBorder:'#1e1e35', accent:'#00b4d8', accentDim:'rgba(0,180,216,0.12)', text:'#f0f0ff', textSub:'#8888aa', green:'#00c897', orange:'#ff9f43', red:'#ff6b6b', gold:'#ffd700', goldDim:'rgba(255,215,0,0.1)' };
 
@@ -17,6 +18,7 @@ type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
 type Resultado  = '1'|'X'|'2';
 type Marcador   = { local: string; visitante: string };
 
+// ─── Countdown ────────────────────────────────────────────────────────────────
 function useCountdown(fechaISO: string) {
   const calcDiff = () => Math.max(0, new Date(fechaISO).getTime() - Date.now());
   const [ms, setMs] = useState(calcDiff);
@@ -32,7 +34,6 @@ function useCountdown(fechaISO: string) {
   const s = Math.floor((total % 60000) / 1000);
   return { total, d, h, m, s };
 }
-
 function Countdown({ fecha }: { fecha: string }) {
   const { total, d, h, m, s } = useCountdown(fecha);
   if (total <= 0) return null;
@@ -52,9 +53,9 @@ const cdStyles = StyleSheet.create({
   textoUrgente:{ color:C.orange },
 });
 
+// ─── Confetti ─────────────────────────────────────────────────────────────────
 const COLORES_CONFETTI = ['#00b4d8','#00c897','#ffd700','#ff9f43','#ff6b6b','#9b59b6','#f0f0ff'];
 const N_CONFETTI = 22;
-
 function ConfettiPieza({ delay, color }: { delay: number; color: string }) {
   const y = useRef(new Animated.Value(-20)).current;
   const x = useRef(new Animated.Value(0)).current;
@@ -96,6 +97,7 @@ const confettiStyles = StyleSheet.create({
   pieza: { position: 'absolute', top: 0, width: 10, height: 10, borderRadius: 2 },
 });
 
+// ─── Selector de jornadas ─────────────────────────────────────────────────────
 function SelectorQuinielas({
   jornadas, seleccionada, onSeleccionar, quinielasUsuario,
 }: {
@@ -120,7 +122,7 @@ function SelectorQuinielas({
           const pendiente = quiniela && !pagada;
           return (
             <TouchableOpacity key={j.id} style={[selectorStyles.chip, activa && selectorStyles.chipActivo]} onPress={() => onSeleccionar(j)} activeOpacity={0.75}>
-              {pagada && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
+              {pagada    && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
               {pendiente && <Ionicons name="time" size={13} color={C.orange} />}
               {!quiniela && <Ionicons name="ellipse-outline" size={13} color={activa ? C.accent : C.textSub} />}
               <Text style={[selectorStyles.chipTexto, activa && selectorStyles.chipTextoActivo]} numberOfLines={1}>{j.nombre}</Text>
@@ -150,6 +152,7 @@ const selectorStyles = StyleSheet.create({
   chipPrecioTexto: { color: C.gold, fontSize: 10, fontWeight: '800' },
 });
 
+// ─── Input marcador ───────────────────────────────────────────────────────────
 function InputMarcador({
   partido, marcador, onChange, disabled,
 }: {
@@ -196,39 +199,35 @@ const marcadorStyles = StyleSheet.create({
   separador: { color:C.text, fontWeight:'900', fontSize:18 },
 });
 
+// ─── Screen principal ─────────────────────────────────────────────────────────
 export default function QuinielaScreen() {
   const { user, usuario } = useAuth();
   const insets = useSafeAreaInsets();
 
   const [jornadasAbiertas, setJornadasAbiertas] = useState<Jornada[]>([]);
-  const [jornada, setJornada] = useState<Jornada | null>(null);
-  const [partidos, setPartidos]         = useState<Partido[]>([]);
-  const [predicciones, setPredicciones] = useState<Record<string, Resultado>>({});
-  const [marcadores, setMarcadores]     = useState<Record<string, Marcador>>({});
-  const [quiniela, setQuiniela]         = useState<QuinielaDB | null>(null);
+  const [jornada, setJornada]                   = useState<Jornada | null>(null);
+  const [partidos, setPartidos]                 = useState<Partido[]>([]);
+  const [predicciones, setPredicciones]         = useState<Record<string, Resultado>>({});
+  const [marcadores, setMarcadores]             = useState<Record<string, Marcador>>({});
+  const [quiniela, setQuiniela]                 = useState<QuinielaDB | null>(null);
   const [quinielasUsuario, setQuinielasUsuario] = useState<QuinielaDB[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [refreshing, setRefreshing]     = useState(false);
-  const [loadingPago, setLoadingPago]   = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const prevEstadoRef = useRef<string | null>(null);
+  const [loading, setLoading]                   = useState(true);
+  const [refreshing, setRefreshing]             = useState(false);
+  const [loadingPago, setLoadingPago]           = useState(false);
+  const [showConfetti, setShowConfetti]         = useState(false);
   const [pagoRecienConfirmado, setPagoRecienConfirmado] = useState(false);
 
-  const cargarJornadas = useCallback(async () => {
-    if (!user) return;
-    const { data: jData } = await supabase
-      .from('jornadas').select('id,nombre,estado,precio,porcentaje_organizador,bolsa_total')
-      .eq('estado', 'abierta').order('creado_at', { ascending: false });
-    const lista: Jornada[] = jData || [];
-    setJornadasAbiertas(lista);
-    const { data: qAll } = await supabase
-      .from('quinielas').select('id,estado_pago,jornada_id')
-      .eq('usuario_id', user.id);
-    setQuinielasUsuario(qAll || []);
-    return lista;
-  }, [user]);
+  // Ref para saber si ya se hizo la carga inicial (no repetir al volver a la tab)
+  const cargaInicialHecha = useRef(false);
+  const prevEstadoRef     = useRef<string | null>(null);
 
-  const cargarJornada = useCallback(async (j: Jornada) => {
+  // ── Carga de partidos y predicciones existentes para una jornada ──
+  // IMPORTANTE: NO toca predicciones/marcadores si el usuario aún no ha guardado
+  // (quiniela === null) para no pisar lo que el usuario está llenando.
+  const cargarJornada = useCallback(async (
+    j: Jornada,
+    opciones?: { forzarPredicciones?: boolean }
+  ) => {
     if (!user) return;
     const { data: pData } = await supabase
       .from('partidos').select('*').eq('jornada_id', j.id).order('fecha');
@@ -238,6 +237,7 @@ export default function QuinielaScreen() {
       .from('quinielas').select('id,estado_pago,jornada_id')
       .eq('usuario_id', user.id).eq('jornada_id', j.id).maybeSingle();
 
+    // Detectar pago recién confirmado
     if (qData && prevEstadoRef.current === 'pendiente' && qData.estado_pago === 'pagado') {
       setPagoRecienConfirmado(true);
       setShowConfetti(true);
@@ -247,55 +247,118 @@ export default function QuinielaScreen() {
     prevEstadoRef.current = qData?.estado_pago ?? null;
     setQuiniela(qData);
 
-    if (qData && pData) {
-      const { data: predData } = await supabase
-        .from('predicciones').select('partido_id,resultado,goles_local,goles_visitante')
-        .eq('usuario_id', user.id).in('partido_id', pData.map(p => p.id));
-      const mapRes: Record<string, Resultado> = {};
-      const mapMarcador: Record<string, Marcador> = {};
-      (predData || []).forEach(p => {
-        mapRes[p.partido_id] = p.resultado as Resultado;
-        mapMarcador[p.partido_id] = {
-          local: p.goles_local != null ? String(p.goles_local) : '',
-          visitante: p.goles_visitante != null ? String(p.goles_visitante) : '',
-        };
-      });
-      setPredicciones(mapRes);
-      setMarcadores(mapMarcador);
-    } else {
-      setPredicciones({});
-      setMarcadores({});
+    // Solo cargar predicciones guardadas si:
+    // 1. El usuario ya tiene quiniela guardada en DB, O
+    // 2. Se fuerza explícitamente (primera carga)
+    if ((qData && pData) || opciones?.forzarPredicciones) {
+      if (pData && pData.length > 0) {
+        const { data: predData } = await supabase
+          .from('predicciones').select('partido_id,resultado,goles_local,goles_visitante')
+          .eq('usuario_id', user.id).in('partido_id', pData.map(p => p.id));
+        const mapRes: Record<string, Resultado> = {};
+        const mapMarcador: Record<string, Marcador> = {};
+        (predData || []).forEach(p => {
+          mapRes[p.partido_id] = p.resultado as Resultado;
+          mapMarcador[p.partido_id] = {
+            local:    p.goles_local    != null ? String(p.goles_local)    : '',
+            visitante: p.goles_visitante != null ? String(p.goles_visitante) : '',
+          };
+        });
+        setPredicciones(mapRes);
+        setMarcadores(mapMarcador);
+      }
     }
+    // Si no hay quiniela guardada y no se fuerza, NO tocamos predicciones/marcadores
+    // para preservar lo que el usuario ya seleccionó
   }, [user]);
 
-  const cargar = useCallback(async () => {
+  // ── Carga inicial completa (jornadas + primera jornada) ──
+  const cargarInicial = useCallback(async () => {
     if (!user) return;
-    const lista = await cargarJornadas();
-    if (jornada) {
-      const jActualizada = (lista || []).find(j => j.id === jornada.id);
-      if (jActualizada) { setJornada(jActualizada); await cargarJornada(jActualizada); }
-      else if ((lista || []).length > 0) { setJornada((lista || [])[0]); await cargarJornada((lista || [])[0]); }
-      else { setJornada(null); setPartidos([]); setQuiniela(null); }
-    } else if ((lista || []).length > 0) {
-      setJornada((lista || [])[0]); await cargarJornada((lista || [])[0]);
+    const { data: jData } = await supabase
+      .from('jornadas').select('id,nombre,estado,precio,porcentaje_organizador,bolsa_total')
+      .eq('estado', 'abierta').order('creado_at', { ascending: false });
+    const lista: Jornada[] = jData || [];
+    setJornadasAbiertas(lista);
+
+    const { data: qAll } = await supabase
+      .from('quinielas').select('id,estado_pago,jornada_id').eq('usuario_id', user.id);
+    setQuinielasUsuario(qAll || []);
+
+    if (lista.length > 0) {
+      setJornada(lista[0]);
+      await cargarJornada(lista[0], { forzarPredicciones: true });
     } else {
       setJornada(null); setPartidos([]); setQuiniela(null);
     }
-  }, [user, jornada, cargarJornadas, cargarJornada]);
+  }, [user, cargarJornada]);
 
-  const seleccionarJornada = useCallback(async (j: Jornada) => {
-    setJornada(j); setPartidos([]); setPredicciones({}); setMarcadores({}); setQuiniela(null);
-    await cargarJornada(j);
-  }, [cargarJornada]);
+  // ── Refresh manual: solo refresca jornadas y estado de pago,
+  //    SIN tocar predicciones en curso ──
+  const refrescarSinBorrar = useCallback(async () => {
+    if (!user) return;
+    const { data: jData } = await supabase
+      .from('jornadas').select('id,nombre,estado,precio,porcentaje_organizador,bolsa_total')
+      .eq('estado', 'abierta').order('creado_at', { ascending: false });
+    const lista: Jornada[] = jData || [];
+    setJornadasAbiertas(lista);
 
+    const { data: qAll } = await supabase
+      .from('quinielas').select('id,estado_pago,jornada_id').eq('usuario_id', user.id);
+    setQuinielasUsuario(qAll || []);
+
+    if (jornada) {
+      const jActualizada = lista.find(j => j.id === jornada.id);
+      if (jActualizada) {
+        setJornada(jActualizada);
+        // Solo verifica estado de pago, no sobreescribe predicciones
+        const { data: qData } = await supabase
+          .from('quinielas').select('id,estado_pago,jornada_id')
+          .eq('usuario_id', user.id).eq('jornada_id', jActualizada.id).maybeSingle();
+        if (qData && prevEstadoRef.current === 'pendiente' && qData.estado_pago === 'pagado') {
+          setPagoRecienConfirmado(true);
+          setShowConfetti(true);
+          setTimeout(() => setShowConfetti(false), 2500);
+          setTimeout(() => setPagoRecienConfirmado(false), 6000);
+        }
+        prevEstadoRef.current = qData?.estado_pago ?? null;
+        setQuiniela(qData);
+      }
+    }
+  }, [user, jornada]);
+
+  // ── Carga inicial solo una vez ──
   useEffect(() => {
+    if (!user || cargaInicialHecha.current) return;
+    cargaInicialHecha.current = true;
     setLoading(true);
-    cargar().finally(() => setLoading(false));
-    const interval = setInterval(() => cargar(), 30000);
-    return () => clearInterval(interval);
-  }, [user]);
+    cargarInicial().finally(() => setLoading(false));
+  }, [user, cargarInicial]);
 
-  const onRefresh = useCallback(async () => { setRefreshing(true); await cargar(); setRefreshing(false); }, [cargar]);
+  // ── Al volver a la tab: solo verificar estado de pago (sin borrar nada) ──
+  useFocusEffect(
+    useCallback(() => {
+      if (!cargaInicialHecha.current) return; // primera vez la maneja el useEffect
+      refrescarSinBorrar();
+    }, [refrescarSinBorrar])
+  );
+
+  // ── Pull-to-refresh manual ──
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refrescarSinBorrar();
+    setRefreshing(false);
+  }, [refrescarSinBorrar]);
+
+  // ── Cambiar jornada manualmente ──
+  const seleccionarJornada = useCallback(async (j: Jornada) => {
+    setJornada(j);
+    setPartidos([]);
+    setPredicciones({});
+    setMarcadores({});
+    setQuiniela(null);
+    await cargarJornada(j, { forzarPredicciones: true });
+  }, [cargarJornada]);
 
   const seleccionar = (id: string, r: Resultado) => {
     if (quiniela) return;
@@ -325,11 +388,12 @@ export default function QuinielaScreen() {
           usuario_id: user.id,
           partido_id: p.id,
           resultado: predicciones[p.id],
-          goles_local: m?.local !== '' && m?.local != null ? parseInt(m.local, 10) : null,
+          goles_local:     m?.local     !== '' && m?.local     != null ? parseInt(m.local, 10)     : null,
           goles_visitante: m?.visitante !== '' && m?.visitante != null ? parseInt(m.visitante, 10) : null,
         };
       });
-      const { error: predError } = await supabase.from('predicciones').upsert(rows, { onConflict: 'usuario_id,partido_id' });
+      const { error: predError } = await supabase
+        .from('predicciones').upsert(rows, { onConflict: 'usuario_id,partido_id' });
       if (predError) throw new Error('Error guardando predicciones: ' + predError.message);
       const { error: qError } = await supabase.from('quinielas').upsert(
         { usuario_id: user.id, jornada_id: jornada.id, jornada: 0, estado_pago: 'pendiente', aciertos: 0 },
@@ -339,12 +403,13 @@ export default function QuinielaScreen() {
       const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(
         'https://kdvbmvsolrquphfedldz.supabase.co/functions/v1/crear-pago',
-        { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        { method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
           body: JSON.stringify({ nombre: usuario?.nombre || 'Jugador', usuario_id: user.id, jornada_id: jornada.id, jornada_nombre: jornada.nombre }) }
       );
       const data = await response.json();
       if (response.ok && data.urlPago) {
-        await cargar();
+        await refrescarSinBorrar();
         if (Platform.OS === 'web') (window as any).open(data.urlPago, '_self');
         else Linking.openURL(data.urlPago);
       } else { throw new Error(data.error || 'No se pudo crear el pago.'); }
@@ -355,20 +420,18 @@ export default function QuinielaScreen() {
   const formatFecha = (f: string) =>
     new Date(f).toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 
-  // Solo calcula el premio neto visible para el usuario (sin mencionar % org)
   const calcularPremioUsuario = () => {
     if (!jornada?.bolsa_total) return null;
     const porcOrg = jornada.porcentaje_organizador ?? 0;
-    const premio = jornada.bolsa_total * ((100 - porcOrg) / 100);
-    return premio;
+    return jornada.bolsa_total * ((100 - porcOrg) / 100);
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large" /></View>;
 
-  const yaGuardo = !!quiniela;
-  const esPagado = quiniela?.estado_pago === 'pagado';
-  const todoSel  = partidos.length > 0 && partidos.every(p => predicciones[p.id]);
-  const selCount = partidos.filter(p => predicciones[p.id]).length;
+  const yaGuardo      = !!quiniela;
+  const esPagado      = quiniela?.estado_pago === 'pagado';
+  const todoSel       = partidos.length > 0 && partidos.every(p => predicciones[p.id]);
+  const selCount      = partidos.filter(p => predicciones[p.id]).length;
   const premioUsuario = calcularPremioUsuario();
 
   return (
@@ -380,6 +443,7 @@ export default function QuinielaScreen() {
         style={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* HEADER */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
@@ -393,8 +457,12 @@ export default function QuinielaScreen() {
           )}
         </View>
 
-        {/* SELECTOR */}
-        <SelectorQuinielas jornadas={jornadasAbiertas} seleccionada={jornada} onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario} />
+        <SelectorQuinielas
+          jornadas={jornadasAbiertas}
+          seleccionada={jornada}
+          onSeleccionar={seleccionarJornada}
+          quinielasUsuario={quinielasUsuario}
+        />
 
         {jornadasAbiertas.length === 0 && (
           <View style={styles.emptyBox}>
@@ -425,7 +493,6 @@ export default function QuinielaScreen() {
               </View>
             </View>
 
-            {/* Premio a ganar — solo monto, sin mencionar % org */}
             {premioUsuario != null && premioUsuario > 0 && (
               <View style={styles.bolsaCard}>
                 <Ionicons name="trophy" size={20} color={C.gold} />
