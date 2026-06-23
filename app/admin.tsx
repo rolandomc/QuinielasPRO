@@ -108,6 +108,8 @@ export default function AdminScreen(){
   const [syncingByJornada,setSyncingByJornada]=useState<Record<string,boolean>>({});
   const [borrando,setBorrando]=useState<string|null>(null);
   const [vistaUsuarios,setVistaUsuarios]=useState(false);
+  // badge retiros pendientes
+  const [retirosPendientes,setRetirosPendientes]=useState(0);
 
   const [wizardStep,setWizardStep]=useState<WizardStep>(1);
   const [wNombre,setWNombre]=useState('');
@@ -151,14 +153,16 @@ export default function AdminScreen(){
 
   const cargarDatos=async()=>{
     setLoading(true);
-    const [{data:j},{data:p},{data:q}]=await Promise.all([
+    const [{data:j},{data:p},{data:q},{data:r}]=await Promise.all([
       supabase.from('jornadas').select('*').order('creado_at',{ascending:false}),
       supabase.from('partidos').select('*').order('fecha'),
       supabase.from('quinielas').select('id,estado_pago,codigo,jornada_id,usuario_id,monto_cobrado,usuarios(nombre,username)'),
+      supabase.from('solicitudes_retiro').select('id').eq('estado','pendiente'),
     ]);
     if(j)setJornadas(j);
     if(p)setPartidos(p);
     if(q)setQuinielas(q as any);
+    setRetirosPendientes((r||[]).length);
     setLoading(false);
   };
 
@@ -374,6 +378,8 @@ export default function AdminScreen(){
 
   const mostrarNav = screen !== 'crear_quiniela';
 
+  // ─── RENDERS ──────────────────────────────────────────────────────────────
+
   const renderCrearQuiniela=()=>(
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'}>
       <WizardIndicator step={wizardStep}/>
@@ -529,7 +535,7 @@ export default function AdminScreen(){
         <View style={[styles.detalleBanner,{backgroundColor:eDim,borderBottomColor:eColor+'30'}]}>
           <View style={{flex:1}}>
             <Text style={styles.detalleNombre} numberOfLines={2}>{j.nombre}</Text>
-            <Text style={styles.detalleInfo}>{pJ.length} partidos · {conRes}/{pJ.length} resultados{j.precio?` · $${j.precio}/c`:''}{porcOrg>0?` · ${porcOrg}% org.`:''}</Text>
+            <Text style={styles.detalleInfo}>{pJ.length} partidos · {conRes}/{pJ.length} resultados{j.precio?` · $${j.precio}/c`:''}{ porcOrg>0?` · ${porcOrg}% org.`:''}</Text>
           </View>
           <View style={[styles.estadoPill,{backgroundColor:eColor+'20',borderColor:eColor}]}>
             <View style={[styles.estadoDot,{backgroundColor:eColor}]}/>
@@ -586,15 +592,8 @@ export default function AdminScreen(){
             <Ionicons name="pricetag-outline" size={15} color={C.gold}/>
             <Text style={[styles.detalleBtnTexto,{color:C.gold}]}>{j.precio?`$${j.precio}`:'Precio'}{porcOrg>0?` · ${porcOrg}%`:''}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/admin-retiros')}>
-            <Ionicons name="wallet-outline" size={20} color={C.accent} />
-            <Text>Retiros</Text>
-          </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.detalleBtn,vistaUsuarios
-              ?{backgroundColor:C.purpleDim,borderColor:C.purple}
-              :{backgroundColor:'rgba(167,139,250,0.05)',borderColor:C.purple+'50'}
-            ]}
+            style={[styles.detalleBtn,{backgroundColor:C.purpleDim,borderColor:C.purple},vistaUsuarios&&{borderColor:C.purple,backgroundColor:C.purpleDim}]}
             onPress={()=>setVistaUsuarios(v=>!v)}
           >
             <Ionicons name="people" size={15} color={C.purple}/>
@@ -697,6 +696,30 @@ export default function AdminScreen(){
         <StatChip icon="cash-outline" value={`$${recaudacionTotal.toFixed(0)}`} label="Recaudado" color={C.gold} dim={C.goldDim}/>
         <StatChip icon="time-outline" value={String(pendientesTot)} label="Pendientes" color={C.orange} dim={C.orangeDim}/>
       </View>
+
+      {/* Acceso rápido a Retiros */}
+      <TouchableOpacity
+        style={styles.retirosBannerBtn}
+        onPress={()=>router.push('/admin-retiros')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.retirosBannerLeft}>
+          <Ionicons name="wallet-outline" size={22} color={C.accent}/>
+          <View>
+            <Text style={styles.retirosBannerTitulo}>Solicitudes de Retiro</Text>
+            <Text style={styles.retirosBannerSub}>Aprobar o rechazar retiros pendientes</Text>
+          </View>
+        </View>
+        <View style={styles.retirosBannerRight}>
+          {retirosPendientes>0&&(
+            <View style={styles.retirosBadge}>
+              <Text style={styles.retirosBadgeTexto}>{retirosPendientes}</Text>
+            </View>
+          )}
+          <Ionicons name="chevron-forward" size={18} color={C.textSub}/>
+        </View>
+      </TouchableOpacity>
+
       {jornadasActivas.length>0&&(
         <>
           <Text style={styles.seccionTitulo}>Jornadas activas</Text>
@@ -845,6 +868,8 @@ export default function AdminScreen(){
     </ScrollView>
   );
 
+  // ─── MODALES ──────────────────────────────────────────────────────────────
+
   const renderModalResultado=()=>(
     <Modal visible={modalResultado} transparent animationType="slide" onRequestClose={()=>setModalResultado(false)}>
       <View style={styles.modalOverlay}>
@@ -958,6 +983,8 @@ export default function AdminScreen(){
     </Modal>
   );
 
+  // ─── RENDER PRINCIPAL ─────────────────────────────────────────────────────
+
   return(
     <View style={[styles.root,{paddingTop:insets.top}]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
@@ -973,7 +1000,14 @@ export default function AdminScreen(){
           <Text style={styles.headerTitulo}>
             {screen==='home'?'Admin':screen==='jornada_detalle'?(jornadaSel?.nombre||'Detalle'):screen==='quinielas'?'Quinielas':'Ingresos'}
           </Text>
-          <View style={{width:36}}/>
+          {/* Badge retiros en header */}
+          {screen==='home'&&retirosPendientes>0
+            ?<TouchableOpacity style={styles.headerRetiroBtn} onPress={()=>router.push('/admin-retiros')}>
+               <Ionicons name="wallet-outline" size={20} color={C.orange}/>
+               <View style={styles.headerRetiroBadge}><Text style={styles.headerRetiroBadgeTexto}>{retirosPendientes}</Text></View>
+             </TouchableOpacity>
+            :<View style={{width:36}}/>
+          }
         </View>
       )}
 
@@ -996,9 +1030,17 @@ export default function AdminScreen(){
               <Ionicons name="add" size={26} color="#fff"/>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('ingresos')} activeOpacity={0.7}>
-            <Ionicons name="bar-chart-outline" size={22} color={screen==='ingresos'?C.accent:C.textMuted}/>
-            <Text style={[styles.navTabLabel,screen==='ingresos'&&{color:C.accent}]}>Ingresos</Text>
+          {/* TAB RETIROS con badge */}
+          <TouchableOpacity style={styles.navTab} onPress={()=>router.push('/admin-retiros')} activeOpacity={0.7}>
+            <View style={{position:'relative'}}>
+              <Ionicons name="wallet-outline" size={22} color={C.textMuted}/>
+              {retirosPendientes>0&&(
+                <View style={styles.navBadge}>
+                  <Text style={styles.navBadgeTexto}>{retirosPendientes}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.navTabLabel}>Retiros</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1016,11 +1058,24 @@ const styles = StyleSheet.create({
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
   headerBack:{width:36,height:36,justifyContent:'center',alignItems:'center'},
   headerTitulo:{fontSize:17,fontWeight:'700',color:C.text,flex:1,textAlign:'center'},
+  headerRetiroBtn:{width:36,height:36,justifyContent:'center',alignItems:'center'},
+  headerRetiroBadge:{position:'absolute',top:-4,right:-4,backgroundColor:C.orange,borderRadius:8,minWidth:16,height:16,alignItems:'center',justifyContent:'center',paddingHorizontal:3},
+  headerRetiroBadgeTexto:{color:'#fff',fontSize:9,fontWeight:'900'},
   bottomNav:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.cardBorder},
   navTab:{flex:1,alignItems:'center',paddingTop:10,paddingBottom:4,gap:2},
   navTabCenter:{justifyContent:'center',paddingTop:0,paddingBottom:0},
   navAddBtn:{width:52,height:52,backgroundColor:C.accent,borderRadius:26,justifyContent:'center',alignItems:'center',marginBottom:8,shadowColor:C.accent,shadowOffset:{width:0,height:4},shadowOpacity:0.5,shadowRadius:8,elevation:8},
   navTabLabel:{fontSize:10,color:C.textMuted,fontWeight:'500'},
+  navBadge:{position:'absolute',top:-4,right:-6,backgroundColor:C.orange,borderRadius:8,minWidth:16,height:16,alignItems:'center',justifyContent:'center',paddingHorizontal:3},
+  navBadgeTexto:{color:'#fff',fontSize:9,fontWeight:'900'},
+  // Banner retiros en home
+  retirosBannerBtn:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',backgroundColor:C.card,borderRadius:14,borderWidth:1,borderColor:C.accent+'40',padding:14,marginBottom:20},
+  retirosBannerLeft:{flexDirection:'row',alignItems:'center',gap:12},
+  retirosBannerTitulo:{color:C.text,fontSize:14,fontWeight:'700'},
+  retirosBannerSub:{color:C.textSub,fontSize:11,marginTop:2},
+  retirosBannerRight:{flexDirection:'row',alignItems:'center',gap:8},
+  retirosBadge:{backgroundColor:C.orange,borderRadius:12,minWidth:22,height:22,alignItems:'center',justifyContent:'center',paddingHorizontal:6},
+  retirosBadgeTexto:{color:'#fff',fontSize:11,fontWeight:'900'},
   statsRow:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:20},
   statChip:{flex:1,minWidth:'44%',borderRadius:12,borderWidth:1,padding:12,alignItems:'center',gap:4},
   statChipVal:{fontSize:20,fontWeight:'800'},
