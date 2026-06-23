@@ -7,38 +7,10 @@ import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import NeonWrapper from '../../components/NeonWrapper';
-
-// ─── Paleta STATZ-style ───────────────────────────────────────────────────────
-const C = {
-  bg:          '#0b0b10',
-  card:        '#13131a',
-  cardBorder:  '#1f1f2e',
-  accent:      '#00d4ff',
-  accentDim:   'rgba(0,212,255,0.10)',
-  accentGlow:  'rgba(0,212,255,0.25)',
-  text:        '#f4f4ff',
-  textSub:     '#7070a0',
-  green:       '#00e5a0',
-  greenDim:    'rgba(0,229,160,0.10)',
-  greenGlow:   'rgba(0,229,160,0.28)',
-  orange:      '#ffb340',
-  orangeDim:   'rgba(255,179,64,0.10)',
-  orangeGlow:  'rgba(255,179,64,0.28)',
-  red:         '#ff5a6e',
-  redDim:      'rgba(255,90,110,0.10)',
-  gold:        '#ffd060',
-  goldDim:     'rgba(255,208,96,0.10)',
-  goldGlow:    'rgba(255,208,96,0.28)',
-  purple:      '#b57bff',
-  purpleDim:   'rgba(181,123,255,0.10)',
-  purpleGlow:  'rgba(181,123,255,0.28)',
-  pink:        '#ff4fa0',
-  pinkDim:     'rgba(255,79,160,0.10)',
-  pinkGlow:    'rgba(255,79,160,0.28)',
-};
 
 type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
 type Jornada    = { id:string; nombre:string; estado:string; precio?:number|null; porcentaje_organizador?:number|null; bolsa_total?:number|null };
@@ -62,26 +34,20 @@ function useCountdown(fechaISO: string) {
   return { total, d, h, m, s };
 }
 
-function Countdown({ fecha }: { fecha: string }) {
+function Countdown({ fecha, C }: { fecha: string; C: any }) {
   const { total, d, h, m, s } = useCountdown(fecha);
   if (total <= 0) return null;
   const urgente = total < 3600000;
   const texto = d > 0 ? `Inicia en ${d}d ${h}h ${m}m` : h > 0 ? `Inicia en ${h}h ${m}m ${s}s` : `Inicia en ${m}m ${s}s`;
   return (
-    <View style={[cdStyles.wrap, urgente && cdStyles.wrapUrgente]}>
+    <View style={[{ flexDirection:'row', alignItems:'center', gap:4, alignSelf:'center', marginTop:4, marginBottom:2, borderRadius:8, paddingHorizontal:8, paddingVertical:3, borderWidth:1 }, { backgroundColor: urgente ? C.orangeDim : C.accentDim, borderColor: urgente ? 'rgba(255,179,64,0.4)' : 'rgba(0,212,255,0.25)' }]}>
       <Ionicons name="time-outline" size={12} color={urgente ? C.orange : C.accent} />
-      <Text style={[cdStyles.texto, urgente && cdStyles.textoUrgente]}>{texto}</Text>
+      <Text style={{ color: urgente ? C.orange : C.accent, fontSize:11, fontWeight:'700' }}>{texto}</Text>
     </View>
   );
 }
-const cdStyles = StyleSheet.create({
-  wrap:{ flexDirection:'row', alignItems:'center', gap:4, alignSelf:'center', marginTop:4, marginBottom:2, backgroundColor:C.accentDim, borderRadius:8, paddingHorizontal:8, paddingVertical:3, borderWidth:1, borderColor:'rgba(0,212,255,0.25)' },
-  wrapUrgente:{ backgroundColor:C.orangeDim, borderColor:'rgba(255,179,64,0.4)' },
-  texto:{ color:C.accent, fontSize:11, fontWeight:'700' },
-  textoUrgente:{ color:C.orange },
-});
 
-function BannerCierre({ fechaPrimerPartido, yaGuardo }: { fechaPrimerPartido: string; yaGuardo: boolean }) {
+function BannerCierre({ fechaPrimerPartido, yaGuardo, C }: { fechaPrimerPartido: string; yaGuardo: boolean; C: any }) {
   const { total, d, h, m, s } = useCountdown(fechaPrimerPartido);
   if (total <= 0 || yaGuardo) return null;
   const critico  = total < 3600000;
@@ -90,44 +56,33 @@ function BannerCierre({ fechaPrimerPartido, yaGuardo }: { fechaPrimerPartido: st
   const bloques = dias
     ? [{ valor: String(d).padStart(2,'0'), label:'DÍAS' },{ valor:String(h).padStart(2,'0'),label:'HRS' },{ valor:String(m).padStart(2,'0'),label:'MIN' }]
     : [{ valor: String(h).padStart(2,'0'), label:'HRS' },{ valor:String(m).padStart(2,'0'),label:'MIN' },{ valor:String(s).padStart(2,'0'),label:'SEG' }];
-  const bgColor  = critico ? C.redDim : urgente ? C.orangeDim : C.accentDim;
-  const bdColor  = critico ? C.red    : urgente ? C.orange    : C.accent;
+  const bgColor  = critico ? C.redDim    : urgente ? C.orangeDim : C.accentDim;
+  const bdColor  = critico ? C.red       : urgente ? C.orange    : C.accent;
   const glowColor= critico ? 'rgba(255,90,110,0.35)' : urgente ? 'rgba(255,179,64,0.35)' : C.accentGlow;
-  const numColor = critico ? C.red    : urgente ? C.orange    : C.text;
+  const numColor = critico ? C.red       : urgente ? C.orange    : C.text;
   return (
     <NeonWrapper color={glowColor} borderRadius={18} shadowRadius={14} opacity={1} style={{ marginHorizontal:16, marginBottom:14 }}>
-      <View style={[bannerStyles.wrap, { backgroundColor:bgColor, borderColor:bdColor }]}>
-        <View style={bannerStyles.topRow}>
+      <View style={[{ borderRadius:18, borderWidth:1.5, padding:16 }, { backgroundColor:bgColor, borderColor:bdColor }]}>
+        <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:12 }}>
           <Ionicons name={critico ? 'warning' : 'timer-outline'} size={16} color={bdColor} />
-          <Text style={[bannerStyles.titulo, { color:bdColor }]}>{critico ? '⚠️ ¡Última hora!' : urgente ? '⏰ Cierra en menos de 3 horas' : '📅 Tiempo para registrar tu quiniela'}</Text>
+          <Text style={{ fontSize:13, fontWeight:'800', flex:1, lineHeight:18, color:bdColor }}>{critico ? '⚠️ ¡Última hora!' : urgente ? '⏰ Cierra en menos de 3 horas' : '📅 Tiempo para registrar tu quiniela'}</Text>
         </View>
-        <View style={bannerStyles.bloquesRow}>
+        <View style={{ flexDirection:'row', justifyContent:'center', alignItems:'center', gap:4, marginBottom:10 }}>
           {bloques.map((b, i) => (
             <React.Fragment key={b.label}>
-              <View style={[bannerStyles.bloque, { borderColor: bdColor + '50' }]}>
-                <Text style={[bannerStyles.numero, { color:numColor }]}>{b.valor}</Text>
-                <Text style={[bannerStyles.label, { color:bdColor }]}>{b.label}</Text>
+              <View style={[{ alignItems:'center', minWidth:56, borderRadius:12, paddingVertical:8, paddingHorizontal:10, borderWidth:1, backgroundColor:'rgba(0,0,0,0.35)' }, { borderColor: bdColor + '50' }]}>
+                <Text style={{ fontSize:34, fontWeight:'900', letterSpacing:1, color:numColor }}>{b.valor}</Text>
+                <Text style={{ fontSize:9, fontWeight:'800', letterSpacing:1.5, marginTop:2, color:bdColor }}>{b.label}</Text>
               </View>
-              {i < bloques.length - 1 && <Text style={[bannerStyles.separador,{color:numColor}]}>:</Text>}
+              {i < bloques.length - 1 && <Text style={{ fontSize:28, fontWeight:'900', marginBottom:8, color:numColor }}>:</Text>}
             </React.Fragment>
           ))}
         </View>
-        <Text style={[bannerStyles.subtexto,{color:bdColor+'cc'}]}>Una vez que inicie el primer partido ya no podrás modificar tus selecciones.</Text>
+        <Text style={{ fontSize:11, textAlign:'center', lineHeight:16, color:bdColor+'cc' }}>Una vez que inicie el primer partido ya no podrás modificar tus selecciones.</Text>
       </View>
     </NeonWrapper>
   );
 }
-const bannerStyles = StyleSheet.create({
-  wrap:{ borderRadius:18, borderWidth:1.5, padding:16 },
-  topRow:{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:12 },
-  titulo:{ fontSize:13, fontWeight:'800', flex:1, lineHeight:18 },
-  bloquesRow:{ flexDirection:'row', justifyContent:'center', alignItems:'center', gap:4, marginBottom:10 },
-  bloque:{ alignItems:'center', minWidth:56, backgroundColor:'rgba(0,0,0,0.35)', borderRadius:12, paddingVertical:8, paddingHorizontal:10, borderWidth:1 },
-  numero:{ fontSize:34, fontWeight:'900', letterSpacing:1 },
-  label:{ fontSize:9, fontWeight:'800', letterSpacing:1.5, marginTop:2 },
-  separador:{ fontSize:28, fontWeight:'900', marginBottom:8 },
-  subtexto:{ fontSize:11, textAlign:'center', lineHeight:16 },
-});
 
 const COLORES_CONFETTI = ['#00d4ff','#00e5a0','#ffd060','#ffb340','#ff5a6e','#b57bff','#f4f4ff'];
 const N_CONFETTI = 22;
@@ -150,36 +105,32 @@ function ConfettiPieza({ delay, color }: { delay: number; color: string }) {
     return () => clearTimeout(timer);
   }, []);
   const rotate = rot.interpolate({ inputRange:[0,8], outputRange:['0deg','720deg'] });
-  return <Animated.View style={[confettiStyles.pieza,{backgroundColor:color,opacity:op,transform:[{translateY:y},{translateX:x},{rotate}],left:'50%',marginLeft:startX}]} />;
+  return <Animated.View style={[{ position:'absolute', top:0, width:10, height:10, borderRadius:2, backgroundColor:color, opacity:op, transform:[{translateY:y},{translateX:x},{rotate}], left:'50%', marginLeft:startX }]} />;
 }
 function Confetti({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
-    <View style={confettiStyles.container} pointerEvents="none">
+    <View style={{ ...StyleSheet.absoluteFillObject, zIndex:999 }} pointerEvents="none">
       {Array.from({length:N_CONFETTI}).map((_,i)=>(
         <ConfettiPieza key={i} delay={Math.random()*400} color={COLORES_CONFETTI[i%COLORES_CONFETTI.length]} />
       ))}
     </View>
   );
 }
-const confettiStyles = StyleSheet.create({
-  container:{ ...StyleSheet.absoluteFillObject, zIndex:999, pointerEvents:'none' },
-  pieza:{ position:'absolute', top:0, width:10, height:10, borderRadius:2 },
-});
 
 function SelectorQuinielas({
-  jornadas, seleccionada, onSeleccionar, quinielasUsuario,
+  jornadas, seleccionada, onSeleccionar, quinielasUsuario, C,
 }: {
   jornadas:Jornada[]; seleccionada:Jornada|null;
-  onSeleccionar:(j:Jornada)=>void; quinielasUsuario:QuinielaDB[];
+  onSeleccionar:(j:Jornada)=>void; quinielasUsuario:QuinielaDB[]; C: any;
 }) {
   if (jornadas.length <= 1) return null;
   return (
-    <View style={selectorStyles.wrap}>
-      <View style={selectorStyles.headerRow}>
+    <View style={{ marginHorizontal:16, marginBottom:16, backgroundColor:C.card, borderRadius:18, padding:16, borderWidth:1, borderColor:C.cardBorder }}>
+      <View style={{ flexDirection:'row', alignItems:'center', gap:6, marginBottom:12 }}>
         <Ionicons name="layers" size={14} color={C.accent} />
-        <Text style={selectorStyles.titulo}>Quinielas disponibles</Text>
-        <View style={selectorStyles.countBadge}><Text style={selectorStyles.countTexto}>{jornadas.length}</Text></View>
+        <Text style={{ color:C.text, fontWeight:'800', fontSize:14, flex:1 }}>Quinielas disponibles</Text>
+        <View style={{ backgroundColor:C.accentDim, borderRadius:10, paddingHorizontal:7, paddingVertical:2, borderWidth:1, borderColor:'rgba(0,212,255,0.35)' }}><Text style={{ color:C.accent, fontSize:11, fontWeight:'800' }}>{jornadas.length}</Text></View>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:2}}>
         {jornadas.map(j=>{
@@ -189,13 +140,13 @@ function SelectorQuinielas({
           const pendiente = quiniela && !pagada;
           return (
             <NeonWrapper key={j.id} color={activa ? C.accentGlow : 'transparent'} borderRadius={12} shadowRadius={activa ? 8 : 0} opacity={activa ? 1 : 0}>
-              <TouchableOpacity style={[selectorStyles.chip, activa && selectorStyles.chipActivo]} onPress={()=>onSeleccionar(j)} activeOpacity={0.75}>
+              <TouchableOpacity style={[{ flexDirection:'row', alignItems:'center', gap:6, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingHorizontal:12, paddingVertical:8, backgroundColor:C.bg, maxWidth:200 }, activa && { borderColor:C.accent, backgroundColor:C.accentDim }]} onPress={()=>onSeleccionar(j)} activeOpacity={0.75}>
                 {pagada    && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
                 {pendiente && <Ionicons name="time" size={13} color={C.orange} />}
                 {!quiniela && <Ionicons name="ellipse-outline" size={13} color={activa?C.accent:C.textSub} />}
-                <Text style={[selectorStyles.chipTexto, activa && selectorStyles.chipTextoActivo]} numberOfLines={1}>{j.nombre}</Text>
+                <Text style={[{ color:C.textSub, fontSize:12, fontWeight:'600', flexShrink:1 }, activa && { color:C.accent }]} numberOfLines={1}>{j.nombre}</Text>
                 {j.precio!=null&&j.precio>0&&(
-                  <View style={selectorStyles.chipPrecio}><Text style={selectorStyles.chipPrecioTexto}>${j.precio}</Text></View>
+                  <View style={{ backgroundColor:C.goldDim, borderRadius:6, paddingHorizontal:5, paddingVertical:1, borderWidth:1, borderColor:'rgba(255,208,96,0.35)' }}><Text style={{ color:C.gold, fontSize:10, fontWeight:'800' }}>${j.precio}</Text></View>
                 )}
               </TouchableOpacity>
             </NeonWrapper>
@@ -205,40 +156,27 @@ function SelectorQuinielas({
     </View>
   );
 }
-const selectorStyles = StyleSheet.create({
-  wrap:{ marginHorizontal:16, marginBottom:16, backgroundColor:C.card, borderRadius:18, padding:16, borderWidth:1, borderColor:C.cardBorder },
-  headerRow:{ flexDirection:'row', alignItems:'center', gap:6, marginBottom:12 },
-  titulo:{ color:C.text, fontWeight:'800', fontSize:14, flex:1 },
-  countBadge:{ backgroundColor:C.accentDim, borderRadius:10, paddingHorizontal:7, paddingVertical:2, borderWidth:1, borderColor:'rgba(0,212,255,0.35)' },
-  countTexto:{ color:C.accent, fontSize:11, fontWeight:'800' },
-  chip:{ flexDirection:'row', alignItems:'center', gap:6, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingHorizontal:12, paddingVertical:8, backgroundColor:C.bg, maxWidth:200 },
-  chipActivo:{ borderColor:C.accent, backgroundColor:C.accentDim },
-  chipTexto:{ color:C.textSub, fontSize:12, fontWeight:'600', flexShrink:1 },
-  chipTextoActivo:{ color:C.accent },
-  chipPrecio:{ backgroundColor:C.goldDim, borderRadius:6, paddingHorizontal:5, paddingVertical:1, borderWidth:1, borderColor:'rgba(255,208,96,0.35)' },
-  chipPrecioTexto:{ color:C.gold, fontSize:10, fontWeight:'800' },
-});
 
 function InputMarcador({
-  partido,marcador,onChange,disabled,
+  partido,marcador,onChange,disabled,C,
 }:{
-  partido:Partido;marcador:Marcador;onChange:(m:Marcador)=>void;disabled:boolean;
+  partido:Partido;marcador:Marcador;onChange:(m:Marcador)=>void;disabled:boolean;C:any;
 }) {
   return (
-    <View style={marcadorStyles.wrap}>
+    <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginTop:10, paddingTop:10, borderTopWidth:1, borderTopColor:C.cardBorder }}>
       <Ionicons name="football-outline" size={12} color={C.textSub} />
-      <Text style={marcadorStyles.label}>Marcador pronosticado</Text>
-      <View style={marcadorStyles.inputs}>
+      <Text style={{ color:C.textSub, fontSize:11, flex:1 }}>Marcador pronosticado</Text>
+      <View style={{ flexDirection:'row', alignItems:'center', gap:6 }}>
         <TextInput
-          style={[marcadorStyles.input,disabled&&marcadorStyles.inputDisabled]}
+          style={[{ width:38, height:34, borderWidth:1.5, borderColor:C.accent, borderRadius:8, textAlign:'center', color:C.text, fontSize:16, fontWeight:'700', backgroundColor:C.accentDim }, disabled && { borderColor:C.cardBorder, color:C.textSub, backgroundColor:'transparent' }]}
           value={marcador.local}
           onChangeText={v=>onChange({...marcador,local:v.replace(/[^0-9]/g,'').slice(0,2)})}
           keyboardType="number-pad" maxLength={2} placeholder="0"
           placeholderTextColor={C.textSub} editable={!disabled} selectTextOnFocus
         />
-        <Text style={marcadorStyles.separador}>-</Text>
+        <Text style={{ color:C.text, fontWeight:'900', fontSize:18 }}>-</Text>
         <TextInput
-          style={[marcadorStyles.input,disabled&&marcadorStyles.inputDisabled]}
+          style={[{ width:38, height:34, borderWidth:1.5, borderColor:C.accent, borderRadius:8, textAlign:'center', color:C.text, fontSize:16, fontWeight:'700', backgroundColor:C.accentDim }, disabled && { borderColor:C.cardBorder, color:C.textSub, backgroundColor:'transparent' }]}
           value={marcador.visitante}
           onChangeText={v=>onChange({...marcador,visitante:v.replace(/[^0-9]/g,'').slice(0,2)})}
           keyboardType="number-pad" maxLength={2} placeholder="0"
@@ -248,17 +186,10 @@ function InputMarcador({
     </View>
   );
 }
-const marcadorStyles = StyleSheet.create({
-  wrap:{ flexDirection:'row', alignItems:'center', gap:8, marginTop:10, paddingTop:10, borderTopWidth:1, borderTopColor:C.cardBorder },
-  label:{ color:C.textSub, fontSize:11, flex:1 },
-  inputs:{ flexDirection:'row', alignItems:'center', gap:6 },
-  input:{ width:38, height:34, borderWidth:1.5, borderColor:C.accent, borderRadius:8, textAlign:'center', color:C.text, fontSize:16, fontWeight:'700', backgroundColor:'rgba(0,212,255,0.07)' },
-  inputDisabled:{ borderColor:C.cardBorder, color:C.textSub, backgroundColor:'transparent' },
-  separador:{ color:C.text, fontWeight:'900', fontSize:18 },
-});
 
 export default function QuinielaScreen() {
   const { user, usuario } = useAuth();
+  const { colors: C, theme } = useTheme();
   const insets = useSafeAreaInsets();
 
   const [jornadasAbiertas, setJornadasAbiertas] = useState<Jornada[]>([]);
@@ -423,7 +354,7 @@ export default function QuinielaScreen() {
     return jornada.bolsa_total*((100-porcOrg)/100);
   };
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={C.accent} size="large" /></View>;
+  if (loading) return <View style={{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor:C.bg }}><ActivityIndicator color={C.accent} size="large" /></View>;
 
   const yaGuardo      = !!quiniela;
   const esPagado      = quiniela?.estado_pago==='pagado';
@@ -432,72 +363,71 @@ export default function QuinielaScreen() {
   const premioUsuario = calcularPremioUsuario();
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+    <View style={{ flex:1, backgroundColor:C.bg }}>
+      <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
       <Confetti visible={showConfetti} />
       <ScrollView
-        style={styles.scroll}
+        style={{ flex:1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         {/* HEADER */}
-        <View style={[styles.header,{paddingTop:insets.top+16}]}>
-          <Text style={styles.headerTitle}>⚽ Mi Quiniela</Text>
+        <View style={{ paddingBottom:16, paddingHorizontal:20, backgroundColor:C.bg, paddingTop:insets.top+16 }}>
+          <Text style={{ color:C.text, fontSize:28, fontWeight:'bold', marginBottom:10 }}>⚽ Mi Quiniela</Text>
           {jornada?.precio!=null&&jornada.precio>0&&(
             <NeonWrapper color={C.goldGlow} borderRadius={14} shadowRadius={10} opacity={1}>
-              <View style={styles.precioDestacado}>
+              <View style={{ flexDirection:'row', alignItems:'center', gap:7, backgroundColor:C.goldDim, borderWidth:1.5, borderColor:'rgba(255,208,96,0.40)', borderRadius:14, paddingHorizontal:14, paddingVertical:8, alignSelf:'flex-start' }}>
                 <Ionicons name="pricetag" size={16} color={C.gold} />
-                <Text style={styles.precioDestacadoMonto}>${jornada.precio}</Text>
-                <Text style={styles.precioDestacadoLabel}>por quiniela</Text>
+                <Text style={{ color:C.gold, fontSize:22, fontWeight:'900' }}>${jornada.precio}</Text>
+                <Text style={{ color:'rgba(255,208,96,0.7)', fontSize:13, fontWeight:'600' }}>por quiniela</Text>
               </View>
             </NeonWrapper>
           )}
         </View>
 
-        <SelectorQuinielas jornadas={jornadasAbiertas} seleccionada={jornada} onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario} />
+        <SelectorQuinielas jornadas={jornadasAbiertas} seleccionada={jornada} onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario} C={C} />
 
         {jornadasAbiertas.length===0&&(
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyEmoji}>⏳</Text>
-            <Text style={styles.emptyTitulo}>Sin quiniela activa</Text>
-            <Text style={styles.emptyTexto}>El administrador aún no ha abierto ninguna jornada.</Text>
+          <View style={{ alignItems:'center', padding:60 }}>
+            <Text style={{ fontSize:54, marginBottom:16 }}>⏳</Text>
+            <Text style={{ fontSize:18, fontWeight:'bold', color:C.text, marginBottom:8 }}>Sin quiniela activa</Text>
+            <Text style={{ color:C.textSub, fontSize:14, textAlign:'center', lineHeight:22 }}>El administrador aún no ha abierto ninguna jornada.</Text>
           </View>
         )}
 
         {jornada&&partidos.length===0&&(
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyEmoji}>📋</Text>
-            <Text style={styles.emptyTitulo}>Sin partidos aún</Text>
-            <Text style={styles.emptyTexto}>Pronto se agregarán los partidos de {jornada.nombre}.</Text>
+          <View style={{ alignItems:'center', padding:60 }}>
+            <Text style={{ fontSize:54, marginBottom:16 }}>📋</Text>
+            <Text style={{ fontSize:18, fontWeight:'bold', color:C.text, marginBottom:8 }}>Sin partidos aún</Text>
+            <Text style={{ color:C.textSub, fontSize:14, textAlign:'center', lineHeight:22 }}>Pronto se agregarán los partidos de {jornada.nombre}.</Text>
           </View>
         )}
 
         {jornada&&partidos.length>0&&(
           <>
-            {/* Jornada header card — glow rosa */}
             <NeonWrapper color={C.pinkGlow} borderRadius={18} shadowRadius={16} opacity={1} style={{ marginHorizontal:16, marginBottom:12 }}>
-              <View style={styles.jornadaHeaderCard}>
+              <View style={{ flexDirection:'row', alignItems:'center', backgroundColor:C.card, borderRadius:18, padding:14, borderWidth:1.5, borderColor:'rgba(255,79,160,0.5)', gap:10 }}>
                 <View style={{flex:1}}>
-                  <Text style={styles.jornadaNombreGrande}>{jornada.nombre}</Text>
-                  <Text style={styles.jornadaSubtexto}>{partidos.length} partidos · {jornada.estado==='abierta'?'Abierta':'En curso'}</Text>
+                  <Text style={{ color:C.text, fontWeight:'bold', fontSize:15 }}>{jornada.nombre}</Text>
+                  <Text style={{ color:C.textSub, fontSize:11, marginTop:3 }}>{partidos.length} partidos · {jornada.estado==='abierta'?'Abierta':'En curso'}</Text>
                 </View>
-                <View style={styles.estadoPill}>
-                  <View style={[styles.estadoDot,{backgroundColor:C.green}]} />
-                  <Text style={[styles.estadoTexto,{color:C.green}]}>ABIERTA</Text>
+                <View style={{ flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:8, paddingVertical:3, borderRadius:20, borderWidth:1, borderColor:C.green, backgroundColor:C.greenDim }}>
+                  <View style={{ width:6, height:6, borderRadius:3, backgroundColor:C.green }} />
+                  <Text style={{ fontSize:9, fontWeight:'800', letterSpacing:0.5, color:C.green }}>ABIERTA</Text>
                 </View>
               </View>
             </NeonWrapper>
 
-            {fechaPrimerPartido&&<BannerCierre fechaPrimerPartido={fechaPrimerPartido} yaGuardo={yaGuardo} />}
+            {fechaPrimerPartido&&<BannerCierre fechaPrimerPartido={fechaPrimerPartido} yaGuardo={yaGuardo} C={C} />}
 
             {premioUsuario!=null&&premioUsuario>0&&(
               <NeonWrapper color={C.goldGlow} borderRadius={18} shadowRadius={14} opacity={1} style={{ marginHorizontal:16, marginBottom:12 }}>
-                <View style={styles.bolsaCard}>
+                <View style={{ flexDirection:'row', alignItems:'center', gap:12, padding:16, borderRadius:18, backgroundColor:C.goldDim, borderWidth:1.5, borderColor:'rgba(255,208,96,0.4)' }}>
                   <Ionicons name="trophy" size={20} color={C.gold} />
                   <View style={{flex:1}}>
-                    <Text style={styles.bolsaTitulo}>🏆 Premio a ganar</Text>
-                    <Text style={styles.bolsaMonto}>${premioUsuario.toFixed(2)}</Text>
+                    <Text style={{ color:C.textSub, fontWeight:'700', fontSize:12, marginBottom:2 }}>🏆 Premio a ganar</Text>
+                    <Text style={{ color:C.gold, fontWeight:'900', fontSize:26 }}>${premioUsuario.toFixed(2)}</Text>
                   </View>
                 </View>
               </NeonWrapper>
@@ -505,11 +435,11 @@ export default function QuinielaScreen() {
 
             {pagoRecienConfirmado&&(
               <NeonWrapper color={C.greenGlow} borderRadius={18} shadowRadius={14} opacity={1} style={{ marginHorizontal:16, marginBottom:12 }}>
-                <View style={styles.bannerPagoConfirmado}>
-                  <Text style={styles.bannerPagoEmoji}>🎉</Text>
+                <View style={{ flexDirection:'row', alignItems:'center', gap:10, padding:16, borderRadius:18, backgroundColor:C.greenDim, borderWidth:1.5, borderColor:C.green }}>
+                  <Text style={{ fontSize:28 }}>🎉</Text>
                   <View style={{flex:1}}>
-                    <Text style={styles.bannerPagoTitulo}>¡Tu pago fue confirmado!</Text>
-                    <Text style={styles.bannerPagoSub}>Ya estás participando en {jornada.nombre}</Text>
+                    <Text style={{ color:C.green, fontWeight:'800', fontSize:15 }}>¡Tu pago fue confirmado!</Text>
+                    <Text style={{ color:C.textSub, fontSize:12, marginTop:2 }}>Ya estás participando en {jornada.nombre}</Text>
                   </View>
                   <Ionicons name="checkmark-circle" size={22} color={C.green} />
                 </View>
@@ -522,37 +452,34 @@ export default function QuinielaScreen() {
                 borderRadius={14} shadowRadius={12} opacity={1}
                 style={{ marginHorizontal:16, marginBottom:12 }}
               >
-                <View style={[styles.statusBanner, esPagado?styles.bannerGreen:styles.bannerOrange]}>
+                <View style={[{ flexDirection:'row', alignItems:'center', gap:10, padding:14, borderRadius:14 }, esPagado ? { backgroundColor:C.greenDim, borderWidth:1.5, borderColor:C.green } : { backgroundColor:C.orangeDim, borderWidth:1.5, borderColor:C.orange }]}>
                   <Ionicons name={esPagado?'checkmark-circle':'time-outline'} size={18} color="#fff" />
-                  <Text style={styles.statusText}>{esPagado?'Pago confirmado — ¡Estás participando! 🎉':'Pago pendiente — Completa tu pago para participar'}</Text>
+                  <Text style={{ color:C.text, fontWeight:'600', fontSize:13, flex:1 }}>{esPagado?'Pago confirmado — ¡Estás participando! 🎉':'Pago pendiente — Completa tu pago para participar'}</Text>
                 </View>
               </NeonWrapper>
             )}
 
             {!yaGuardo&&(
-              <View style={styles.avisoDesempate}>
+              <View style={{ flexDirection:'row', alignItems:'flex-start', gap:8, marginHorizontal:16, marginBottom:10, padding:12, borderRadius:12, backgroundColor:C.accentDim, borderWidth:1, borderColor:'rgba(0,212,255,0.25)' }}>
                 <Ionicons name="information-circle-outline" size={14} color={C.accent} />
-                <Text style={styles.avisoTexto}><Text style={{fontWeight:'700',color:C.accent}}>Desempate por marcador:</Text> ingresa el marcador exacto de cada partido para desempatar en caso de empate en aciertos.</Text>
+                <Text style={{ color:C.textSub, fontSize:11, flex:1, lineHeight:16 }}><Text style={{fontWeight:'700',color:C.accent}}>Desempate por marcador:</Text> ingresa el marcador exacto de cada partido para desempatar en caso de empate en aciertos.</Text>
               </View>
             )}
 
             {!yaGuardo&&(
-              <View style={styles.progressBox}>
-                <View style={styles.progressRow}>
-                  <Text style={styles.progressLabel}>{selCount}/{partidos.length} seleccionados</Text>
-                  <Text style={styles.progressPct}>{Math.round(selCount/partidos.length*100)}%</Text>
+              <View style={{ marginHorizontal:16, marginBottom:12, backgroundColor:C.card, borderRadius:14, padding:14, borderWidth:1, borderColor:C.cardBorder }}>
+                <View style={{ flexDirection:'row', justifyContent:'space-between', marginBottom:8 }}>
+                  <Text style={{ color:C.textSub, fontSize:13 }}>{selCount}/{partidos.length} seleccionados</Text>
+                  <Text style={{ color:C.accent, fontSize:13, fontWeight:'700' }}>{Math.round(selCount/partidos.length*100)}%</Text>
                 </View>
-                <View style={styles.progressBar}>
-                  <View style={[styles.progressFill,{width:`${selCount/partidos.length*100}%` as any}]} />
+                <View style={{ height:4, backgroundColor:C.cardBorder, borderRadius:2 }}>
+                  <View style={{ height:4, backgroundColor:C.accent, borderRadius:2, width:`${selCount/partidos.length*100}%` as any }} />
                 </View>
-                {todoSel&&<Text style={styles.completoTexto}>✨ ¡Quiniela completa! Ya puedes confirmar y pagar.</Text>}
+                {todoSel&&<Text style={{ color:C.green, fontSize:12, fontWeight:'700', marginTop:8, textAlign:'center' }}>✨ ¡Quiniela completa! Ya puedes confirmar y pagar.</Text>}
               </View>
             )}
 
             {partidos.map(p=>{
-              const activo1 = predicciones[p.id]==='1';
-              const activoX = predicciones[p.id]==='X';
-              const activo2 = predicciones[p.id]==='2';
               const seleccion = predicciones[p.id];
               const glowCard = seleccion==='1'?C.accentGlow : seleccion==='X'?C.purpleGlow : seleccion==='2'?C.greenGlow : 'transparent';
               return (
@@ -564,15 +491,15 @@ export default function QuinielaScreen() {
                   opacity={seleccion ? 0.9 : 0}
                   style={{ marginHorizontal:16, marginBottom:10 }}
                 >
-                  <View style={styles.partidoCard}>
-                    <Text style={styles.partidoFecha}>{formatFecha(p.fecha)}</Text>
-                    <Countdown fecha={p.fecha} />
-                    <View style={styles.equiposRow}>
-                      <Text style={styles.equipo} numberOfLines={1}>{p.local}</Text>
-                      <View style={styles.vsBadge}><Text style={styles.vsText}>VS</Text></View>
-                      <Text style={styles.equipo} numberOfLines={1}>{p.visitante}</Text>
+                  <View style={{ backgroundColor:C.card, borderRadius:18, padding:16, borderWidth:1.5, borderColor:'rgba(0,212,255,0.22)' }}>
+                    <Text style={{ color:C.accent, fontSize:12, fontWeight:'600', marginBottom:4, textAlign:'center' }}>{formatFecha(p.fecha)}</Text>
+                    <Countdown fecha={p.fecha} C={C} />
+                    <View style={{ flexDirection:'row', alignItems:'center', marginBottom:14, marginTop:8 }}>
+                      <Text style={{ flex:1, fontSize:15, fontWeight:'bold', color:C.text, textAlign:'center' }} numberOfLines={1}>{p.local}</Text>
+                      <View style={{ backgroundColor:C.cardBorder, paddingHorizontal:8, paddingVertical:3, borderRadius:6, marginHorizontal:6 }}><Text style={{ color:C.textSub, fontSize:10, fontWeight:'700' }}>VS</Text></View>
+                      <Text style={{ flex:1, fontSize:15, fontWeight:'bold', color:C.text, textAlign:'center' }} numberOfLines={1}>{p.visitante}</Text>
                     </View>
-                    <View style={styles.opcionesRow}>
+                    <View style={{ flexDirection:'row', gap:8 }}>
                       {(['1','X','2'] as Resultado[]).map(op=>{
                         const activo = predicciones[p.id]===op;
                         const glowColor = op==='1'?C.accentGlow : op==='X'?C.purpleGlow : C.greenGlow;
@@ -581,15 +508,15 @@ export default function QuinielaScreen() {
                         return (
                           <TouchableOpacity
                             key={op}
-                            style={[styles.opcion,
+                            style={[{ flex:1, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingVertical:10, alignItems:'center', backgroundColor:C.bg },
                               activo&&{backgroundColor:bgActive,borderColor:borderActive,shadowColor:glowColor,shadowOffset:{width:0,height:0},shadowOpacity:1,shadowRadius:10,elevation:6},
                               yaGuardo&&{opacity:0.7}
                             ]}
                             onPress={()=>seleccionar(p.id,op)}
                             disabled={yaGuardo} activeOpacity={0.7}
                           >
-                            <Text style={[styles.opcionLetra,activo&&{color:borderActive}]}>{op}</Text>
-                            <Text style={[styles.opcionEquipo,activo&&{color:borderActive}]} numberOfLines={1}>
+                            <Text style={[{ fontSize:17, fontWeight:'bold', color:C.textSub }, activo&&{color:borderActive}]}>{op}</Text>
+                            <Text style={[{ fontSize:11, color:C.textSub, marginTop:3 }, activo&&{color:borderActive}]} numberOfLines={1}>
                               {op==='1'?p.local.slice(0,8):op==='X'?'Empate':p.visitante.slice(0,8)}
                             </Text>
                           </TouchableOpacity>
@@ -601,6 +528,7 @@ export default function QuinielaScreen() {
                       marcador={marcadores[p.id]??{local:'',visitante:''}}
                       onChange={m=>setMarcadorPartido(p.id,m)}
                       disabled={yaGuardo}
+                      C={C}
                     />
                   </View>
                 </NeonWrapper>
@@ -614,8 +542,8 @@ export default function QuinielaScreen() {
                 style={{ marginHorizontal:16, marginTop:8 }}
               >
                 <TouchableOpacity
-                  style={[styles.btnPagar,
-                    todoSel?{backgroundColor:C.accent}:styles.btnDisabled
+                  style={[{ flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8, padding:17, borderRadius:16, backgroundColor:C.card },
+                    todoSel?{backgroundColor:C.accent}:{ backgroundColor:C.card, opacity:0.45 }
                   ]}
                   onPress={confirmarYPagar}
                   disabled={loadingPago||(!todoSel&&!yaGuardo)}
@@ -625,9 +553,9 @@ export default function QuinielaScreen() {
                     ?<ActivityIndicator color="#fff" />
                     :<>
                       <Ionicons name="card" size={18} color={todoSel?C.bg:'#fff'} />
-                      <Text style={[styles.btnPagarTexto,todoSel&&{color:C.bg}]}>{yaGuardo?'Reintentar pago':'Confirmar y pagar'}</Text>
+                      <Text style={[{ color:'#fff', fontWeight:'bold', fontSize:16 }, todoSel&&{color:C.bg}]}>{yaGuardo?'Reintentar pago':'Confirmar y pagar'}</Text>
                       {jornada.precio!=null&&jornada.precio>0&&(
-                        <View style={styles.btnPrecioTag}><Text style={[styles.btnPrecioTagTexto,todoSel&&{color:C.bg}]}>${jornada.precio}</Text></View>
+                        <View style={{ backgroundColor:'rgba(0,0,0,0.3)', borderRadius:8, paddingHorizontal:8, paddingVertical:3 }}><Text style={[{ color:'#fff', fontSize:13, fontWeight:'800' }, todoSel&&{color:C.bg}]}>${jornada.precio}</Text></View>
                       )}
                     </>
                   }
@@ -642,59 +570,3 @@ export default function QuinielaScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root:{ flex:1, backgroundColor:C.bg },
-  center:{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor:C.bg },
-  scroll:{ flex:1 },
-  header:{ paddingBottom:16, paddingHorizontal:20, backgroundColor:C.bg },
-  headerTitle:{ color:C.text, fontSize:28, fontWeight:'bold', marginBottom:10 },
-  precioDestacado:{ flexDirection:'row', alignItems:'center', gap:7, backgroundColor:C.goldDim, borderWidth:1.5, borderColor:'rgba(255,208,96,0.40)', borderRadius:14, paddingHorizontal:14, paddingVertical:8, alignSelf:'flex-start' },
-  precioDestacadoMonto:{ color:C.gold, fontSize:22, fontWeight:'900' },
-  precioDestacadoLabel:{ color:'rgba(255,208,96,0.7)', fontSize:13, fontWeight:'600' },
-  jornadaHeaderCard:{ flexDirection:'row', alignItems:'center', backgroundColor:C.card, borderRadius:18, padding:14, borderWidth:1.5, borderColor:'rgba(255,79,160,0.5)', gap:10 },
-  jornadaNombreGrande:{ color:C.text, fontWeight:'bold', fontSize:15 },
-  jornadaSubtexto:{ color:C.textSub, fontSize:11, marginTop:3 },
-  estadoPill:{ flexDirection:'row', alignItems:'center', gap:5, paddingHorizontal:8, paddingVertical:3, borderRadius:20, borderWidth:1, borderColor:C.green, backgroundColor:C.greenDim },
-  estadoDot:{ width:6, height:6, borderRadius:3 },
-  estadoTexto:{ fontSize:9, fontWeight:'800', letterSpacing:0.5 },
-  bolsaCard:{ flexDirection:'row', alignItems:'center', gap:12, padding:16, borderRadius:18, backgroundColor:C.goldDim, borderWidth:1.5, borderColor:'rgba(255,208,96,0.4)' },
-  bolsaTitulo:{ color:C.textSub, fontWeight:'700', fontSize:12, marginBottom:2 },
-  bolsaMonto:{ color:C.gold, fontWeight:'900', fontSize:26 },
-  avisoDesempate:{ flexDirection:'row', alignItems:'flex-start', gap:8, marginHorizontal:16, marginBottom:10, padding:12, borderRadius:12, backgroundColor:C.accentDim, borderWidth:1, borderColor:'rgba(0,212,255,0.25)' },
-  avisoTexto:{ color:C.textSub, fontSize:11, flex:1, lineHeight:16 },
-  bannerPagoConfirmado:{ flexDirection:'row', alignItems:'center', gap:10, padding:16, borderRadius:18, backgroundColor:C.greenDim, borderWidth:1.5, borderColor:C.green },
-  bannerPagoEmoji:{ fontSize:28 },
-  bannerPagoTitulo:{ color:C.green, fontWeight:'800', fontSize:15 },
-  bannerPagoSub:{ color:C.textSub, fontSize:12, marginTop:2 },
-  statusBanner:{ flexDirection:'row', alignItems:'center', gap:10, padding:14, borderRadius:14 },
-  bannerGreen:{ backgroundColor:C.greenDim, borderWidth:1.5, borderColor:C.green },
-  bannerOrange:{ backgroundColor:C.orangeDim, borderWidth:1.5, borderColor:C.orange },
-  statusText:{ color:C.text, fontWeight:'600', fontSize:13, flex:1 },
-  progressBox:{ marginHorizontal:16, marginBottom:12, backgroundColor:C.card, borderRadius:14, padding:14, borderWidth:1, borderColor:C.cardBorder },
-  progressRow:{ flexDirection:'row', justifyContent:'space-between', marginBottom:8 },
-  progressLabel:{ color:C.textSub, fontSize:13 },
-  progressPct:{ color:C.accent, fontSize:13, fontWeight:'700' },
-  progressBar:{ height:4, backgroundColor:C.cardBorder, borderRadius:2 },
-  progressFill:{ height:4, backgroundColor:C.accent, borderRadius:2 },
-  completoTexto:{ color:C.green, fontSize:12, fontWeight:'700', marginTop:8, textAlign:'center' },
-  partidoCard:{ backgroundColor:C.card, borderRadius:18, padding:16, borderWidth:1.5, borderColor:'rgba(0,212,255,0.22)' },
-  partidoFecha:{ color:C.accent, fontSize:12, fontWeight:'600', marginBottom:4, textAlign:'center' },
-  equiposRow:{ flexDirection:'row', alignItems:'center', marginBottom:14, marginTop:8 },
-  equipo:{ flex:1, fontSize:15, fontWeight:'bold', color:C.text, textAlign:'center' },
-  vsBadge:{ backgroundColor:C.cardBorder, paddingHorizontal:8, paddingVertical:3, borderRadius:6, marginHorizontal:6 },
-  vsText:{ color:C.textSub, fontSize:10, fontWeight:'700' },
-  opcionesRow:{ flexDirection:'row', gap:8 },
-  opcion:{ flex:1, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingVertical:10, alignItems:'center', backgroundColor:'#0e0e18' },
-  opcionLetra:{ fontSize:17, fontWeight:'bold', color:C.textSub },
-  opcionEquipo:{ fontSize:11, color:C.textSub, marginTop:3 },
-  btnPagar:{ flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8, padding:17, borderRadius:16, backgroundColor:C.card },
-  btnDisabled:{ backgroundColor:'#111118', opacity:0.45 },
-  btnPagarTexto:{ color:'#fff', fontWeight:'bold', fontSize:16 },
-  btnPrecioTag:{ backgroundColor:'rgba(0,0,0,0.3)', borderRadius:8, paddingHorizontal:8, paddingVertical:3 },
-  btnPrecioTagTexto:{ color:'#fff', fontSize:13, fontWeight:'800' },
-  emptyBox:{ alignItems:'center', padding:60 },
-  emptyEmoji:{ fontSize:54, marginBottom:16 },
-  emptyTitulo:{ fontSize:18, fontWeight:'bold', color:C.text, marginBottom:8 },
-  emptyTexto:{ color:C.textSub, fontSize:14, textAlign:'center', lineHeight:22 },
-});

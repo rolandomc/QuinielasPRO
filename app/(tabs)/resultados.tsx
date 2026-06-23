@@ -8,14 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import { apifb } from '../../lib/apiFootball';
-
-const C = {
-  bg: '#0d0d1a', card: '#161625', cardBorder: '#1e1e35',
-  accent: '#00b4d8', accentDim: 'rgba(0,180,216,0.12)',
-  text: '#f0f0ff', textSub: '#8888aa',
-  green: '#00c897', orange: '#ff9f43', gold: '#ffd700', red: '#ff6b6b',
-};
 
 const LIVE_STATUS = ['1H', '2H', 'HT', 'ET', 'BT', 'P'];
 const STATUS_LABEL: Record<string, string> = {
@@ -34,7 +28,7 @@ const golesAResultado = (h: number | null, a: number | null): '1' | 'X' | '2' | 
   if (h > a) return '1'; if (a > h) return '2'; return 'X';
 };
 
-function LiveDot() {
+function LiveDot({ color }: { color: string }) {
   const anim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(
@@ -44,11 +38,12 @@ function LiveDot() {
       ])
     ).start();
   }, []);
-  return <Animated.View style={[styles.liveDot, { opacity: anim }]} />;
+  return <Animated.View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color, opacity: anim }} />;
 }
 
 export default function ResultadosScreen() {
   const { user } = useAuth();
+  const { colors: C, theme } = useTheme();
   const insets = useSafeAreaInsets();
 
   const [tab, setTab]                 = useState<TabRes>('quiniela');
@@ -68,7 +63,6 @@ export default function ResultadosScreen() {
   const pollingRef        = useRef<any>(null);
   const cargaInicialHecha = useRef(false);
 
-  // ── Live polling ──────────────────────────────────────────────────────────
   const fetchLive = useCallback(async (ps: Partido[]) => {
     const conApi = ps.filter(p => p.api_fixture_id);
     if (conApi.length === 0) { setLiveActivo(false); return; }
@@ -102,15 +96,12 @@ export default function ResultadosScreen() {
 
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
-  // ── Carga principal ───────────────────────────────────────────────────────
-  // Solo muestra jornadas con estado 'cerrada' (en curso, partidos vivos).
-  // Las 'finalizadas' ya tienen ganador y se ocultan de esta pestaña.
   const cargar = useCallback(async (jornadaForzada?: Jornada) => {
     if (!user) return;
     const { data: jData } = await supabase
       .from('jornadas')
       .select('id,nombre,estado')
-      .eq('estado', 'cerrada')           // ← SOLO cerradas (en curso)
+      .eq('estado', 'cerrada')
       .order('creado_at', { ascending: false });
 
     const lista: Jornada[] = jData || [];
@@ -157,7 +148,6 @@ export default function ResultadosScreen() {
     setRefreshing(false);
   }, [user, iniciarPolling]);
 
-  // Carga inicial una sola vez
   useEffect(() => {
     if (!user || cargaInicialHecha.current) return;
     cargaInicialHecha.current = true;
@@ -165,7 +155,6 @@ export default function ResultadosScreen() {
     cargar();
   }, [user, cargar]);
 
-  // Al volver a la pestaña refresca silenciosamente
   useFocusEffect(
     useCallback(() => {
       if (!cargaInicialHecha.current) return;
@@ -173,14 +162,11 @@ export default function ResultadosScreen() {
     }, [cargar, quinielaSel])
   );
 
-  // Pull-to-refresh
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     cargar(quinielaSel ?? undefined);
   }, [cargar, quinielaSel]);
 
-  // ── Ranking histórico ─────────────────────────────────────────────────────
-  // El histórico SÍ usa jornadas 'finalizadas' (ya terminaron y tienen ganador)
   const cargarHistorico = useCallback(async () => {
     setLoadingHist(true);
     const { data: qAll } = await supabase
@@ -189,7 +175,7 @@ export default function ResultadosScreen() {
       .eq('estado_pago', 'pagado');
     if (!qAll) { setLoadingHist(false); return; }
     const { data: jAll } = await supabase
-      .from('jornadas').select('id').eq('estado', 'finalizada'); // solo finalizadas
+      .from('jornadas').select('id').eq('estado', 'finalizada');
     const jIds = new Set((jAll || []).map((j: any) => j.id));
     const mapaUser: Record<string, RankHist> = {};
     for (const q of qAll) {
@@ -240,37 +226,37 @@ export default function ResultadosScreen() {
     const empate        = resEfectivo === 'X';
     const mostrarGoles  = enVivo || finalizado;
     return (
-      <View key={p.id} style={[styles.partidoCard, enVivo && styles.partidoCardLive]}>
+      <View key={p.id} style={[{ borderRadius:12, marginBottom:10, overflow:'hidden', borderWidth:1.5, borderColor:C.cardBorder, backgroundColor:C.card }, enVivo && { borderColor:C.red, shadowColor:C.red, shadowOpacity:0.35, shadowRadius:8, shadowOffset:{width:0,height:0} }]}>
         {enVivo && (
-          <View style={styles.liveBanner}>
-            <LiveDot />
-            <Text style={styles.liveBannerTexto}>EN VIVO</Text>
-            <Text style={styles.liveBannerMinuto}>
+          <View style={{ flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'rgba(255,107,107,0.12)', paddingHorizontal:12, paddingVertical:6, borderBottomWidth:1, borderBottomColor:'rgba(255,107,107,0.2)' }}>
+            <LiveDot color={C.red} />
+            <Text style={{ color:C.red, fontSize:11, fontWeight:'900', letterSpacing:1.5 }}>EN VIVO</Text>
+            <Text style={{ color:C.red, fontSize:11, fontWeight:'700', marginLeft:2 }}>
               {STATUS_LABEL[live!.status] ?? live!.status}
               {live!.elapsed ? ` ${live!.elapsed}'` : ''}
             </Text>
           </View>
         )}
-        <View style={styles.partidoRow}>
-          <View style={[styles.equipoBox, localGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
-            <Text style={[styles.equipoNombre, localGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.local}</Text>
+        <View style={{ flexDirection:'row', alignItems:'stretch', padding:10 }}>
+          <View style={[{ flex:1, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:10, paddingVertical:12, paddingHorizontal:8, alignItems:'center', justifyContent:'center', backgroundColor:C.bg }, localGana && { borderColor:C.green, backgroundColor:C.greenDim }, empate && { borderColor:C.orange, backgroundColor:C.orangeDim }]}>
+            <Text style={[{ fontSize:12, fontWeight:'bold', color:C.textSub, textAlign:'center' }, localGana && { color:C.green }, empate && { color:C.orange }]} numberOfLines={2}>{p.local}</Text>
             {mostrarGoles && golesHome !== null && (
-              <Text style={[styles.goles, localGana && { color: C.green }, empate && { color: C.orange }]}>{golesHome}</Text>
+              <Text style={[{ fontSize:28, fontWeight:'900', color:C.text, marginTop:4 }, localGana && { color:C.green }, empate && { color:C.orange }]}>{golesHome}</Text>
             )}
           </View>
-          <View style={styles.centroCol}>
-            {!enVivo && !finalizado && <View style={styles.pendienteBadge}><Text style={styles.pendienteTexto}>VS</Text></View>}
-            {enVivo && <Text style={styles.vsLive}>:</Text>}
+          <View style={{ width:56, alignItems:'center', justifyContent:'center', paddingHorizontal:4 }}>
+            {!enVivo && !finalizado && <View style={{ borderWidth:1, borderColor:C.cardBorder, borderRadius:8, paddingHorizontal:5, paddingVertical:4 }}><Text style={{ color:C.textSub, fontSize:12, textAlign:'center', fontWeight:'700' }}>VS</Text></View>}
+            {enVivo && <Text style={{ fontSize:24, fontWeight:'900', color:C.red }}>:</Text>}
             {finalizado && !enVivo && (
-              <View style={empate ? styles.empateBadge : styles.ftBadge}>
-                <Text style={empate ? styles.empateTexto : styles.ftTexto}>{empate ? 'EMP' : 'FT'}</Text>
+              <View style={empate ? { borderWidth:1.5, borderColor:C.orange, borderRadius:8, paddingHorizontal:6, paddingVertical:4, backgroundColor:C.orangeDim } : { borderWidth:1, borderColor:C.green, borderRadius:8, paddingHorizontal:6, paddingVertical:4, backgroundColor:C.greenDim }}>
+                <Text style={empate ? { color:C.orange, fontSize:10, fontWeight:'700', textAlign:'center' } : { color:C.green, fontSize:10, fontWeight:'700' }}>{empate ? 'EMP' : 'FT'}</Text>
               </View>
             )}
           </View>
-          <View style={[styles.equipoBox, visitanteGana && styles.equipoGanador, empate && styles.equipoEmpate]}>
-            <Text style={[styles.equipoNombre, visitanteGana && styles.equipoNombreGanador, empate && styles.equipoNombreEmpate]} numberOfLines={2}>{p.visitante}</Text>
+          <View style={[{ flex:1, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:10, paddingVertical:12, paddingHorizontal:8, alignItems:'center', justifyContent:'center', backgroundColor:C.bg }, visitanteGana && { borderColor:C.green, backgroundColor:C.greenDim }, empate && { borderColor:C.orange, backgroundColor:C.orangeDim }]}>
+            <Text style={[{ fontSize:12, fontWeight:'bold', color:C.textSub, textAlign:'center' }, visitanteGana && { color:C.green }, empate && { color:C.orange }]} numberOfLines={2}>{p.visitante}</Text>
             {mostrarGoles && golesAway !== null && (
-              <Text style={[styles.goles, visitanteGana && { color: C.green }, empate && { color: C.orange }]}>{golesAway}</Text>
+              <Text style={[{ fontSize:28, fontWeight:'900', color:C.text, marginTop:4 }, visitanteGana && { color:C.green }, empate && { color:C.orange }]}>{golesAway}</Text>
             )}
           </View>
         </View>
@@ -279,43 +265,43 @@ export default function ResultadosScreen() {
   };
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+    <View style={{ flex:1, backgroundColor:C.bg }}>
+      <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
       <ScrollView
-        style={styles.scroll}
+        style={{ flex:1 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />
         }
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Text style={styles.headerTitle}>🏆 Resultados</Text>
+        <View style={{ paddingBottom:16, paddingHorizontal:20, paddingTop:insets.top+16 }}>
+          <View style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+            <Text style={{ color:C.text, fontSize:28, fontWeight:'bold' }}>🏆 Resultados</Text>
             {liveActivo && (
-              <View style={styles.livePill}>
-                <LiveDot />
-                <Text style={styles.livePillTexto}>EN VIVO</Text>
+              <View style={{ flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'rgba(255,107,107,0.15)', borderWidth:1, borderColor:C.red, paddingHorizontal:10, paddingVertical:4, borderRadius:20 }}>
+                <LiveDot color={C.red} />
+                <Text style={{ color:C.red, fontSize:10, fontWeight:'800', letterSpacing:1 }}>EN VIVO</Text>
               </View>
             )}
           </View>
           {miPosicion != null && (
-            <View style={styles.miPosBadge}>
+            <View style={{ flexDirection:'row', alignItems:'center', gap:5, marginTop:6, alignSelf:'flex-start', backgroundColor:'rgba(255,215,0,0.1)', borderWidth:1, borderColor:'rgba(255,215,0,0.3)', paddingHorizontal:12, paddingVertical:4, borderRadius:20 }}>
               <Ionicons name="ribbon" size={13} color={C.gold} />
-              <Text style={styles.miPosText}>Tu posición #{miPosicion}</Text>
+              <Text style={{ color:C.gold, fontSize:13, fontWeight:'700' }}>Tu posición #{miPosicion}</Text>
             </View>
           )}
         </View>
 
         {/* Tabs */}
-        <View style={styles.tabsRow}>
-          <TouchableOpacity style={[styles.tabBtn, tab === 'quiniela' && styles.tabActivo]} onPress={() => setTab('quiniela')} activeOpacity={0.8}>
-            <Ionicons name="trophy-outline" size={14} color={tab === 'quiniela' ? C.accent : C.textSub} />
-            <Text style={[styles.tabTexto, tab === 'quiniela' && styles.tabTextoActivo]}>En Curso</Text>
+        <View style={{ flexDirection:'row', marginHorizontal:16, marginBottom:14, gap:8 }}>
+          <TouchableOpacity style={[{ flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6, paddingVertical:10, borderRadius:12, borderWidth:1.5, borderColor:C.cardBorder, backgroundColor:C.card }, tab==='quiniela' && { borderColor:C.accent, backgroundColor:C.accentDim }]} onPress={() => setTab('quiniela')} activeOpacity={0.8}>
+            <Ionicons name="trophy-outline" size={14} color={tab==='quiniela' ? C.accent : C.textSub} />
+            <Text style={[{ color:C.textSub, fontWeight:'700', fontSize:13 }, tab==='quiniela' && { color:C.accent }]}>En Curso</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tabBtn, tab === 'historico' && styles.tabActivo]} onPress={() => setTab('historico')} activeOpacity={0.8}>
-            <Ionicons name="bar-chart-outline" size={14} color={tab === 'historico' ? C.accent : C.textSub} />
-            <Text style={[styles.tabTexto, tab === 'historico' && styles.tabTextoActivo]}>Ranking Global</Text>
+          <TouchableOpacity style={[{ flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6, paddingVertical:10, borderRadius:12, borderWidth:1.5, borderColor:C.cardBorder, backgroundColor:C.card }, tab==='historico' && { borderColor:C.accent, backgroundColor:C.accentDim }]} onPress={() => setTab('historico')} activeOpacity={0.8}>
+            <Ionicons name="bar-chart-outline" size={14} color={tab==='historico' ? C.accent : C.textSub} />
+            <Text style={[{ color:C.textSub, fontWeight:'700', fontSize:13 }, tab==='historico' && { color:C.accent }]}>Ranking Global</Text>
           </TouchableOpacity>
         </View>
 
@@ -325,21 +311,21 @@ export default function ResultadosScreen() {
             {quinielas.length > 1 && (
               <ScrollView
                 horizontal showsHorizontalScrollIndicator={false}
-                style={styles.quinielasScroll}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+                style={{ marginBottom:12 }}
+                contentContainerStyle={{ paddingHorizontal:16, gap:8 }}
               >
                 {quinielas.map(q => (
                   <TouchableOpacity
                     key={q.id}
-                    style={[styles.quinielaBtn, quinielaSel?.id === q.id && styles.quinielaBtnActivo]}
+                    style={[{ paddingHorizontal:14, paddingVertical:8, borderRadius:20, borderWidth:1.5, borderColor:C.cardBorder, backgroundColor:C.card, maxWidth:180, gap:4 }, quinielaSel?.id===q.id && { backgroundColor:C.accentDim, borderColor:C.accent }]}
                     onPress={() => { setQuinielaSel(q); cargar(q); }}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.quinielaTexto, quinielaSel?.id === q.id && styles.quinielaTextoActivo]} numberOfLines={1}>
+                    <Text style={[{ color:C.textSub, fontWeight:'700', fontSize:12 }, quinielaSel?.id===q.id && { color:C.accent }]} numberOfLines={1}>
                       {q.nombre}
                     </Text>
-                    <View style={styles.cerradaBadge}>
-                      <Text style={styles.cerradaTexto}>EN CURSO</Text>
+                    <View style={{ backgroundColor:C.accentDim, borderRadius:6, paddingHorizontal:6, paddingVertical:2, alignSelf:'flex-start' }}>
+                      <Text style={{ color:C.accent, fontSize:9, fontWeight:'800', letterSpacing:0.5 }}>EN CURSO</Text>
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -347,12 +333,12 @@ export default function ResultadosScreen() {
             )}
 
             {loading ? (
-              <ActivityIndicator color={C.accent} style={{ margin: 40 }} />
+              <ActivityIndicator color={C.accent} style={{ margin:40 }} />
             ) : quinielas.length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={{ fontSize: 48, marginBottom: 12 }}>⚽</Text>
-                <Text style={styles.emptyTitulo}>No hay quinielas en curso</Text>
-                <Text style={styles.emptyTexto}>
+              <View style={{ alignItems:'center', padding:50 }}>
+                <Text style={{ fontSize:48, marginBottom:12 }}>⚽</Text>
+                <Text style={{ fontSize:16, fontWeight:'bold', color:C.text, marginBottom:8 }}>No hay quinielas en curso</Text>
+                <Text style={{ color:C.textSub, fontSize:13, textAlign:'center', lineHeight:20 }}>
                   Los resultados en vivo aparecen cuando el admin cierra una jornada.{`\n`}
                   Las jornadas finalizadas aparecen en el Ranking Global.
                 </Text>
@@ -360,12 +346,12 @@ export default function ResultadosScreen() {
             ) : (
               <>
                 {partidos.length > 0 && (
-                  <View style={styles.seccion}>
-                    <View style={styles.seccionHeaderRow}>
-                      <Text style={styles.seccionTitulo}>⚽ {quinielaSel?.nombre}</Text>
-                      <View style={styles.enCursoBadge}>
-                        <LiveDot />
-                        <Text style={styles.enCursoTexto}>En curso</Text>
+                  <View style={{ backgroundColor:C.card, marginHorizontal:16, marginBottom:12, borderRadius:14, padding:16, borderWidth:1, borderColor:C.cardBorder }}>
+                    <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                      <Text style={{ color:C.text, fontWeight:'bold', fontSize:15 }}>⚽ {quinielaSel?.nombre}</Text>
+                      <View style={{ flexDirection:'row', alignItems:'center', gap:5, backgroundColor:'rgba(255,107,107,0.1)', borderWidth:1, borderColor:C.red, paddingHorizontal:8, paddingVertical:3, borderRadius:10 }}>
+                        <LiveDot color={C.red} />
+                        <Text style={{ color:C.red, fontSize:10, fontWeight:'800' }}>En curso</Text>
                       </View>
                     </View>
                     {partidos.map(renderPartido)}
@@ -373,33 +359,33 @@ export default function ResultadosScreen() {
                 )}
 
                 {!hayResultados && Object.keys(liveScores).length === 0 ? (
-                  <View style={styles.emptyBox}>
-                    <Text style={{ fontSize: 48, marginBottom: 12 }}>⏰</Text>
-                    <Text style={styles.emptyTitulo}>Partidos por comenzar</Text>
-                    <Text style={styles.emptyTexto}>Los marcadores aparecerán cuando inicien los partidos.</Text>
+                  <View style={{ alignItems:'center', padding:50 }}>
+                    <Text style={{ fontSize:48, marginBottom:12 }}>⏰</Text>
+                    <Text style={{ fontSize:16, fontWeight:'bold', color:C.text, marginBottom:8 }}>Partidos por comenzar</Text>
+                    <Text style={{ color:C.textSub, fontSize:13, textAlign:'center', lineHeight:20 }}>Los marcadores aparecerán cuando inicien los partidos.</Text>
                   </View>
                 ) : posiciones.length === 0 ? (
-                  <View style={styles.emptyBox}>
-                    <Text style={styles.emptyTexto}>No hay pronósticos con pago confirmado.</Text>
+                  <View style={{ alignItems:'center', padding:50 }}>
+                    <Text style={{ color:C.textSub, fontSize:13, textAlign:'center', lineHeight:20 }}>No hay pronósticos con pago confirmado.</Text>
                   </View>
                 ) : (
-                  <View style={[styles.tablaWrap, { paddingHorizontal: 16 }]}>
-                    <View style={styles.tablaHeader}>
-                      <Text style={[styles.col, styles.colNum]}>#</Text>
-                      <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
-                      <Text style={[styles.col, styles.colAciertos]}>Aciertos</Text>
+                  <View style={{ marginBottom:12, paddingHorizontal:16 }}>
+                    <View style={{ flexDirection:'row', paddingHorizontal:14, paddingVertical:10, marginBottom:4 }}>
+                      <Text style={[{ color:C.textSub, fontSize:14 }, { width:38, textAlign:'center' }]}>#</Text>
+                      <Text style={[{ color:C.textSub, fontSize:14 }, { flex:1, fontWeight:'600', color:C.text }]}>Jugador</Text>
+                      <Text style={[{ color:C.textSub, fontSize:14 }, { width:70, textAlign:'right', fontWeight:'bold' }]}>Aciertos</Text>
                     </View>
                     {posiciones.map((p, i) => (
-                      <View key={p.usuario_id} style={[styles.tablaRow, p.usuario_id === user?.id && styles.rowMio]}>
-                        <Text style={[styles.col, styles.colNum, { color: medallaColor(i), fontSize: i < 3 ? 20 : 14, fontWeight: 'bold' }]}>
+                      <View key={p.usuario_id} style={[{ flexDirection:'row', backgroundColor:C.card, padding:14, borderRadius:12, marginBottom:6, borderWidth:1, borderColor:C.cardBorder, alignItems:'center' }, p.usuario_id===user?.id && { borderColor:C.accent, backgroundColor:C.accentDim }]}>
+                        <Text style={[{ color:C.textSub, fontSize:14 }, { width:38, textAlign:'center' }, { color:medallaColor(i), fontSize:i<3?20:14, fontWeight:'bold' }]}>
                           {medalla(i)}
                         </Text>
-                        <Text style={[styles.col, styles.colNombre, p.usuario_id === user?.id && { color: C.accent }]} numberOfLines={1}>
-                          {p.username}{p.usuario_id === user?.id ? ' ★' : ''}
+                        <Text style={[{ color:C.text, flex:1, fontWeight:'600', fontSize:14 }, p.usuario_id===user?.id && { color:C.accent }]} numberOfLines={1}>
+                          {p.username}{p.usuario_id===user?.id?' ★':''}
                         </Text>
-                        <View style={styles.colAciertosWrap}>
-                          <Text style={styles.aciertosNum}>{p.aciertos}</Text>
-                          <Text style={styles.aciertosTotal}>/{p.total_partidos}</Text>
+                        <View style={{ width:70, flexDirection:'row', justifyContent:'flex-end', alignItems:'baseline' }}>
+                          <Text style={{ fontSize:18, fontWeight:'bold', color:C.text }}>{p.aciertos}</Text>
+                          <Text style={{ fontSize:12, color:C.textSub, marginLeft:1 }}>/{p.total_partidos}</Text>
                         </View>
                       </View>
                     ))}
@@ -410,69 +396,69 @@ export default function ResultadosScreen() {
           </>
         )}
 
-        {/* ─ TAB RANKING GLOBAL (solo finalizadas) ─ */}
+        {/* ─ TAB RANKING GLOBAL ─ */}
         {tab === 'historico' && (
-          <View style={{ paddingHorizontal: 16 }}>
+          <View style={{ paddingHorizontal:16 }}>
             {loadingHist ? (
-              <ActivityIndicator color={C.accent} style={{ margin: 40 }} />
+              <ActivityIndicator color={C.accent} style={{ margin:40 }} />
             ) : rankHist.length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={{ fontSize: 48, marginBottom: 12 }}>🏆</Text>
-                <Text style={styles.emptyTitulo}>Sin datos históricos</Text>
-                <Text style={styles.emptyTexto}>El ranking aparecerá cuando haya quinielas finalizadas.</Text>
+              <View style={{ alignItems:'center', padding:50 }}>
+                <Text style={{ fontSize:48, marginBottom:12 }}>🏆</Text>
+                <Text style={{ fontSize:16, fontWeight:'bold', color:C.text, marginBottom:8 }}>Sin datos históricos</Text>
+                <Text style={{ color:C.textSub, fontSize:13, textAlign:'center', lineHeight:20 }}>El ranking aparecerá cuando haya quinielas finalizadas.</Text>
               </View>
             ) : (
               <>
-                <Text style={[styles.seccionTitulo, { marginBottom: 12 }]}>🏆 Ranking de Campeones</Text>
+                <Text style={{ color:C.text, fontWeight:'bold', fontSize:15, marginBottom:12 }}>🏆 Ranking de Campeones</Text>
                 {rankHist.length >= 3 && (
-                  <View style={styles.podioRow}>
-                    <View style={[styles.podioPuesto, { marginTop: 20 }]}>
-                      <Text style={styles.podioMedalla}>🥈</Text>
-                      <Text style={styles.podioNombre} numberOfLines={1}>{rankHist[1].username}</Text>
-                      <View style={[styles.podioBadge, { backgroundColor: 'rgba(192,192,192,0.12)', borderColor: '#c0c0c0' }]}>
-                        <Text style={[styles.podioBadgeTexto, { color: '#c0c0c0' }]}>{rankHist[1].victorias} 🏆</Text>
+                  <View style={{ flexDirection:'row', justifyContent:'center', alignItems:'flex-end', marginBottom:20, gap:8 }}>
+                    <View style={[{ flex:1, alignItems:'center', backgroundColor:C.card, borderRadius:14, padding:12, borderWidth:1, borderColor:C.cardBorder }, { marginTop:20 }]}>
+                      <Text style={{ fontSize:30, marginBottom:4 }}>🥈</Text>
+                      <Text style={{ color:C.text, fontSize:11, fontWeight:'bold', textAlign:'center', marginBottom:6 }} numberOfLines={1}>{rankHist[1].username}</Text>
+                      <View style={{ borderWidth:1, borderRadius:8, paddingHorizontal:8, paddingVertical:3, backgroundColor:'rgba(192,192,192,0.12)', borderColor:'#c0c0c0' }}>
+                        <Text style={{ fontSize:11, fontWeight:'800', color:'#c0c0c0' }}>{rankHist[1].victorias} 🏆</Text>
                       </View>
                     </View>
-                    <View style={[styles.podioPuesto, styles.podioPrimero]}>
-                      <Text style={{ fontSize: 36 }}>👑</Text>
-                      <Text style={styles.podioMedalla}>🥇</Text>
-                      <Text style={[styles.podioNombre, { color: C.gold }]} numberOfLines={1}>{rankHist[0].username}</Text>
-                      <View style={[styles.podioBadge, { backgroundColor: 'rgba(255,215,0,0.12)', borderColor: C.gold }]}>
-                        <Text style={[styles.podioBadgeTexto, { color: C.gold }]}>{rankHist[0].victorias} 🏆</Text>
+                    <View style={[{ flex:1, alignItems:'center', backgroundColor:'rgba(255,215,0,0.05)', borderRadius:14, padding:12, borderWidth:1, borderColor:'rgba(255,215,0,0.3)', paddingTop:8 }]}>
+                      <Text style={{ fontSize:36 }}>👑</Text>
+                      <Text style={{ fontSize:30, marginBottom:4 }}>🥇</Text>
+                      <Text style={[{ fontSize:11, fontWeight:'bold', textAlign:'center', marginBottom:6 }, { color:C.gold }]} numberOfLines={1}>{rankHist[0].username}</Text>
+                      <View style={{ borderWidth:1, borderRadius:8, paddingHorizontal:8, paddingVertical:3, backgroundColor:'rgba(255,215,0,0.12)', borderColor:C.gold }}>
+                        <Text style={{ fontSize:11, fontWeight:'800', color:C.gold }}>{rankHist[0].victorias} 🏆</Text>
                       </View>
                     </View>
-                    <View style={[styles.podioPuesto, { marginTop: 32 }]}>
-                      <Text style={styles.podioMedalla}>🥉</Text>
-                      <Text style={styles.podioNombre} numberOfLines={1}>{rankHist[2].username}</Text>
-                      <View style={[styles.podioBadge, { backgroundColor: 'rgba(205,127,50,0.12)', borderColor: '#cd7f32' }]}>
-                        <Text style={[styles.podioBadgeTexto, { color: '#cd7f32' }]}>{rankHist[2].victorias} 🏆</Text>
+                    <View style={[{ flex:1, alignItems:'center', backgroundColor:C.card, borderRadius:14, padding:12, borderWidth:1, borderColor:C.cardBorder }, { marginTop:32 }]}>
+                      <Text style={{ fontSize:30, marginBottom:4 }}>🥉</Text>
+                      <Text style={{ color:C.text, fontSize:11, fontWeight:'bold', textAlign:'center', marginBottom:6 }} numberOfLines={1}>{rankHist[2].username}</Text>
+                      <View style={{ borderWidth:1, borderRadius:8, paddingHorizontal:8, paddingVertical:3, backgroundColor:'rgba(205,127,50,0.12)', borderColor:'#cd7f32' }}>
+                        <Text style={{ fontSize:11, fontWeight:'800', color:'#cd7f32' }}>{rankHist[2].victorias} 🏆</Text>
                       </View>
                     </View>
                   </View>
                 )}
-                <View style={styles.tablaWrap}>
-                  <View style={styles.tablaHeader}>
-                    <Text style={[styles.col, styles.colNum]}>#</Text>
-                    <Text style={[styles.col, styles.colNombre]}>Jugador</Text>
-                    <Text style={[styles.col, { width: 36, textAlign: 'center' }]}>🏆</Text>
-                    <Text style={[styles.col, { width: 50, textAlign: 'right' }]}>Prom</Text>
+                <View style={{ marginBottom:12 }}>
+                  <View style={{ flexDirection:'row', paddingHorizontal:14, paddingVertical:10, marginBottom:4 }}>
+                    <Text style={{ color:C.textSub, fontSize:14, width:38, textAlign:'center' }}>#</Text>
+                    <Text style={{ color:C.text, flex:1, fontWeight:'600', fontSize:14 }}>Jugador</Text>
+                    <Text style={{ color:C.textSub, fontSize:14, width:36, textAlign:'center' }}>🏆</Text>
+                    <Text style={{ color:C.textSub, fontSize:14, width:50, textAlign:'right' }}>Prom</Text>
                   </View>
                   {rankHist.map((r, i) => (
-                    <View key={r.usuario_id} style={[styles.tablaRow, r.usuario_id === user?.id && styles.rowMio]}>
-                      <Text style={[styles.col, styles.colNum, { color: medallaColor(i), fontSize: i < 3 ? 18 : 13, fontWeight: 'bold' }]}>
+                    <View key={r.usuario_id} style={[{ flexDirection:'row', backgroundColor:C.card, padding:14, borderRadius:12, marginBottom:6, borderWidth:1, borderColor:C.cardBorder, alignItems:'center' }, r.usuario_id===user?.id && { borderColor:C.accent, backgroundColor:C.accentDim }]}>
+                      <Text style={[{ color:C.textSub, fontSize:14 }, { width:38, textAlign:'center' }, { color:medallaColor(i), fontSize:i<3?18:13, fontWeight:'bold' }]}>
                         {medalla(i)}
                       </Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.col, styles.colNombre, r.usuario_id === user?.id && { color: C.accent }]} numberOfLines={1}>
-                          {r.username}{r.usuario_id === user?.id ? ' ★' : ''}
+                      <View style={{ flex:1 }}>
+                        <Text style={[{ color:C.text, fontWeight:'600', fontSize:14 }, r.usuario_id===user?.id && { color:C.accent }]} numberOfLines={1}>
+                          {r.username}{r.usuario_id===user?.id?' ★':''}
                         </Text>
-                        <Text style={{ color: C.textSub, fontSize: 10, marginTop: 1 }}>
-                          {r.jornadas} quiniela{r.jornadas !== 1 ? 's' : ''} · {r.top3} top3
+                        <Text style={{ color:C.textSub, fontSize:10, marginTop:1 }}>
+                          {r.jornadas} quiniela{r.jornadas!==1?'s':''} · {r.top3} top3
                         </Text>
                       </View>
-                      <Text style={[styles.col, { width: 36, textAlign: 'center', color: C.gold, fontWeight: 'bold' }]}>{r.victorias}</Text>
-                      <Text style={[styles.col, { width: 50, textAlign: 'right', color: C.green }]}>
-                        {r.jornadas > 0 ? (r.totalAciertos / r.jornadas).toFixed(1) : '-'}
+                      <Text style={{ color:C.gold, fontWeight:'bold', fontSize:14, width:36, textAlign:'center' }}>{r.victorias}</Text>
+                      <Text style={{ color:C.green, fontSize:14, width:50, textAlign:'right' }}>
+                        {r.jornadas>0?(r.totalAciertos/r.jornadas).toFixed(1):'-'}
                       </Text>
                     </View>
                   ))}
@@ -482,79 +468,8 @@ export default function ResultadosScreen() {
           </View>
         )}
 
-        <View style={{ height: 50 }} />
+        <View style={{ height:50 }} />
       </ScrollView>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  scroll: { flex: 1 },
-  header: { paddingBottom: 16, paddingHorizontal: 20 },
-  headerTitle: { color: C.text, fontSize: 28, fontWeight: 'bold' },
-  livePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,107,107,0.15)', borderWidth: 1, borderColor: C.red, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  livePillTexto: { color: C.red, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.red },
-  miPosBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: 'rgba(255,215,0,0.1)', borderWidth: 1, borderColor: 'rgba(255,215,0,0.3)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  miPosText: { color: C.gold, fontSize: 13, fontWeight: '700' },
-  tabsRow: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 14, gap: 8 },
-  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: C.card },
-  tabActivo: { borderColor: C.accent, backgroundColor: C.accentDim },
-  tabTexto: { color: C.textSub, fontWeight: '700', fontSize: 13 },
-  tabTextoActivo: { color: C.accent },
-  quinielasScroll: { marginBottom: 12 },
-  quinielaBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: '#2a2a40', backgroundColor: C.card, maxWidth: 180, gap: 4 },
-  quinielaBtnActivo: { backgroundColor: C.accentDim, borderColor: C.accent },
-  quinielaTexto: { color: C.textSub, fontWeight: '700', fontSize: 12 },
-  quinielaTextoActivo: { color: C.accent },
-  cerradaBadge: { backgroundColor: 'rgba(0,180,216,0.1)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
-  cerradaTexto: { color: C.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  seccion: { backgroundColor: C.card, marginHorizontal: 16, marginBottom: 12, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.cardBorder },
-  seccionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  seccionTitulo: { color: C.text, fontWeight: 'bold', fontSize: 15 },
-  enCursoBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,107,107,0.1)', borderWidth: 1, borderColor: C.red, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  enCursoTexto: { color: C.red, fontSize: 10, fontWeight: '800' },
-  partidoCard: { borderRadius: 12, marginBottom: 10, overflow: 'hidden', borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: '#12121f' },
-  partidoCardLive: { borderColor: C.red, shadowColor: C.red, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } },
-  liveBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,107,107,0.12)', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,107,107,0.2)' },
-  liveBannerTexto: { color: C.red, fontSize: 11, fontWeight: '900', letterSpacing: 1.5 },
-  liveBannerMinuto: { color: C.red, fontSize: 11, fontWeight: '700', marginLeft: 2 },
-  partidoRow: { flexDirection: 'row', alignItems: 'stretch', padding: 10 },
-  equipoBox: { flex: 1, borderWidth: 1.5, borderColor: C.cardBorder, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d0d1a' },
-  equipoGanador: { borderColor: C.green, backgroundColor: 'rgba(0,200,151,0.08)' },
-  equipoEmpate: { borderColor: C.orange, backgroundColor: 'rgba(255,159,67,0.06)' },
-  equipoNombre: { fontSize: 12, fontWeight: 'bold', color: C.textSub, textAlign: 'center' },
-  equipoNombreGanador: { color: C.green },
-  equipoNombreEmpate: { color: C.orange },
-  goles: { fontSize: 28, fontWeight: '900', color: C.text, marginTop: 4 },
-  centroCol: { width: 56, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  vsLive: { fontSize: 24, fontWeight: '900', color: C.red },
-  empateBadge: { borderWidth: 1.5, borderColor: C.orange, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4, backgroundColor: 'rgba(255,159,67,0.1)' },
-  empateTexto: { color: C.orange, fontSize: 10, fontWeight: '700', textAlign: 'center' },
-  ftBadge: { borderWidth: 1, borderColor: C.green, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4, backgroundColor: 'rgba(0,200,151,0.08)' },
-  ftTexto: { color: C.green, fontSize: 10, fontWeight: '700' },
-  pendienteBadge: { borderWidth: 1, borderColor: '#2a2a40', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 4 },
-  pendienteTexto: { color: C.textSub, fontSize: 12, textAlign: 'center', fontWeight: '700' },
-  emptyBox: { alignItems: 'center', padding: 50 },
-  emptyTitulo: { fontSize: 16, fontWeight: 'bold', color: C.text, marginBottom: 8 },
-  emptyTexto: { color: C.textSub, fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  tablaWrap: { marginBottom: 12 },
-  tablaHeader: { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4 },
-  tablaRow: { flexDirection: 'row', backgroundColor: C.card, padding: 14, borderRadius: 12, marginBottom: 6, borderWidth: 1, borderColor: C.cardBorder, alignItems: 'center' },
-  rowMio: { borderColor: C.accent, backgroundColor: C.accentDim },
-  col: { color: C.textSub, fontSize: 14 },
-  colNum: { width: 38, textAlign: 'center' },
-  colNombre: { flex: 1, fontWeight: '600', color: C.text },
-  colAciertos: { width: 70, textAlign: 'right', fontWeight: 'bold' },
-  colAciertosWrap: { width: 70, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'baseline' },
-  aciertosNum: { fontSize: 18, fontWeight: 'bold', color: C.text },
-  aciertosTotal: { fontSize: 12, color: C.textSub, marginLeft: 1 },
-  podioRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', marginBottom: 20, gap: 8 },
-  podioPuesto: { flex: 1, alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: C.cardBorder },
-  podioPrimero: { backgroundColor: 'rgba(255,215,0,0.05)', borderColor: 'rgba(255,215,0,0.3)', paddingTop: 8 },
-  podioMedalla: { fontSize: 30, marginBottom: 4 },
-  podioNombre: { color: C.text, fontSize: 11, fontWeight: 'bold', textAlign: 'center', marginBottom: 6 },
-  podioBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  podioBadgeTexto: { fontSize: 11, fontWeight: '800' },
-});
