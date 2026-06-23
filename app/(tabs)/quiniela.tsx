@@ -4,13 +4,13 @@ import {
   Alert, ActivityIndicator, RefreshControl, StatusBar, Platform, Animated, TextInput,
 } from 'react-native';
 import * as Linking from 'expo-linking';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import NeonWrapper from '../../components/NeonWrapper';
+import { NeonCard, NeonButton, ScreenHeader } from '../../components/ui';
 
 type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
 type Jornada    = { id:string; nombre:string; estado:string; precio?:number|null; porcentaje_organizador?:number|null; bolsa_total?:number|null };
@@ -126,11 +126,13 @@ function SelectorQuinielas({
 }) {
   if (jornadas.length <= 1) return null;
   return (
-    <View style={{ marginHorizontal:16, marginBottom:16, backgroundColor:C.card, borderRadius:18, padding:16, borderWidth:1, borderColor:C.cardBorder }}>
+    <NeonCard glow={C.accentGlow} glowRadius={10} style={{ marginHorizontal:16, marginBottom:16 }} cardStyle={{ padding:16 }}>
       <View style={{ flexDirection:'row', alignItems:'center', gap:6, marginBottom:12 }}>
         <Ionicons name="layers" size={14} color={C.accent} />
         <Text style={{ color:C.text, fontWeight:'800', fontSize:14, flex:1 }}>Quinielas disponibles</Text>
-        <View style={{ backgroundColor:C.accentDim, borderRadius:10, paddingHorizontal:7, paddingVertical:2, borderWidth:1, borderColor:'rgba(0,212,255,0.35)' }}><Text style={{ color:C.accent, fontSize:11, fontWeight:'800' }}>{jornadas.length}</Text></View>
+        <View style={{ backgroundColor:C.accentDim, borderRadius:10, paddingHorizontal:7, paddingVertical:2, borderWidth:1, borderColor:'rgba(0,212,255,0.35)' }}>
+          <Text style={{ color:C.accent, fontSize:11, fontWeight:'800' }}>{jornadas.length}</Text>
+        </View>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:2}}>
         {jornadas.map(j=>{
@@ -140,20 +142,26 @@ function SelectorQuinielas({
           const pendiente = quiniela && !pagada;
           return (
             <NeonWrapper key={j.id} color={activa ? C.accentGlow : 'transparent'} borderRadius={12} shadowRadius={activa ? 8 : 0} opacity={activa ? 1 : 0}>
-              <TouchableOpacity style={[{ flexDirection:'row', alignItems:'center', gap:6, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingHorizontal:12, paddingVertical:8, backgroundColor:C.bg, maxWidth:200 }, activa && { borderColor:C.accent, backgroundColor:C.accentDim }]} onPress={()=>onSeleccionar(j)} activeOpacity={0.75}>
+              <TouchableOpacity
+                style={[{ flexDirection:'row', alignItems:'center', gap:6, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:12, paddingHorizontal:12, paddingVertical:8, backgroundColor:C.bg, maxWidth:200 }, activa && { borderColor:C.accent, backgroundColor:C.accentDim }]}
+                onPress={()=>onSeleccionar(j)}
+                activeOpacity={0.75}
+              >
                 {pagada    && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
                 {pendiente && <Ionicons name="time" size={13} color={C.orange} />}
                 {!quiniela && <Ionicons name="ellipse-outline" size={13} color={activa?C.accent:C.textSub} />}
                 <Text style={[{ color:C.textSub, fontSize:12, fontWeight:'600', flexShrink:1 }, activa && { color:C.accent }]} numberOfLines={1}>{j.nombre}</Text>
                 {j.precio!=null&&j.precio>0&&(
-                  <View style={{ backgroundColor:C.goldDim, borderRadius:6, paddingHorizontal:5, paddingVertical:1, borderWidth:1, borderColor:'rgba(255,208,96,0.35)' }}><Text style={{ color:C.gold, fontSize:10, fontWeight:'800' }}>${j.precio}</Text></View>
+                  <View style={{ backgroundColor:C.goldDim, borderRadius:6, paddingHorizontal:5, paddingVertical:1, borderWidth:1, borderColor:'rgba(255,208,96,0.35)' }}>
+                    <Text style={{ color:C.gold, fontSize:10, fontWeight:'800' }}>${j.precio}</Text>
+                  </View>
                 )}
               </TouchableOpacity>
             </NeonWrapper>
           );
         })}
       </ScrollView>
-    </View>
+    </NeonCard>
   );
 }
 
@@ -190,7 +198,6 @@ function InputMarcador({
 export default function QuinielaScreen() {
   const { user, usuario } = useAuth();
   const { colors: C, theme } = useTheme();
-  const insets = useSafeAreaInsets();
 
   const [jornadasAbiertas, setJornadasAbiertas] = useState<Jornada[]>([]);
   const [jornada, setJornada]                   = useState<Jornada | null>(null);
@@ -372,11 +379,10 @@ export default function QuinielaScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* HEADER */}
-        <View style={{ paddingBottom:16, paddingHorizontal:20, backgroundColor:C.bg, paddingTop:insets.top+16 }}>
-          <Text style={{ color:C.text, fontSize:28, fontWeight:'bold', marginBottom:10 }}>⚽ Mi Quiniela</Text>
+        {/* HEADER — ahora con ScreenHeader compartido */}
+        <ScreenHeader title="⚽ Mi Quiniela">
           {jornada?.precio!=null&&jornada.precio>0&&(
-            <NeonWrapper color={C.goldGlow} borderRadius={14} shadowRadius={10} opacity={1}>
+            <NeonWrapper color={C.goldGlow} borderRadius={14} shadowRadius={10} opacity={1} style={{ marginTop: 10 }}>
               <View style={{ flexDirection:'row', alignItems:'center', gap:7, backgroundColor:C.goldDim, borderWidth:1.5, borderColor:'rgba(255,208,96,0.40)', borderRadius:14, paddingHorizontal:14, paddingVertical:8, alignSelf:'flex-start' }}>
                 <Ionicons name="pricetag" size={16} color={C.gold} />
                 <Text style={{ color:C.gold, fontSize:22, fontWeight:'900' }}>${jornada.precio}</Text>
@@ -384,7 +390,7 @@ export default function QuinielaScreen() {
               </View>
             </NeonWrapper>
           )}
-        </View>
+        </ScreenHeader>
 
         <SelectorQuinielas jornadas={jornadasAbiertas} seleccionada={jornada} onSeleccionar={seleccionarJornada} quinielasUsuario={quinielasUsuario} C={C} />
 
@@ -467,7 +473,7 @@ export default function QuinielaScreen() {
             )}
 
             {!yaGuardo&&(
-              <View style={{ marginHorizontal:16, marginBottom:12, backgroundColor:C.card, borderRadius:14, padding:14, borderWidth:1, borderColor:C.cardBorder }}>
+              <NeonCard glow={C.accentGlow} glowRadius={8} style={{ marginHorizontal:16, marginBottom:12 }} cardStyle={{ padding:14 }}>
                 <View style={{ flexDirection:'row', justifyContent:'space-between', marginBottom:8 }}>
                   <Text style={{ color:C.textSub, fontSize:13 }}>{selCount}/{partidos.length} seleccionados</Text>
                   <Text style={{ color:C.accent, fontSize:13, fontWeight:'700' }}>{Math.round(selCount/partidos.length*100)}%</Text>
@@ -476,7 +482,7 @@ export default function QuinielaScreen() {
                   <View style={{ height:4, backgroundColor:C.accent, borderRadius:2, width:`${selCount/partidos.length*100}%` as any }} />
                 </View>
                 {todoSel&&<Text style={{ color:C.green, fontSize:12, fontWeight:'700', marginTop:8, textAlign:'center' }}>✨ ¡Quiniela completa! Ya puedes confirmar y pagar.</Text>}
-              </View>
+              </NeonCard>
             )}
 
             {partidos.map(p=>{
@@ -565,7 +571,7 @@ export default function QuinielaScreen() {
           </>
         )}
 
-        <View style={{height:insets.bottom+40}} />
+        <View style={{height:80}} />
       </ScrollView>
     </View>
   );
