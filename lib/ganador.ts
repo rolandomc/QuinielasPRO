@@ -23,51 +23,6 @@ export interface PosicionQuiniela {
   premio_ganado: number;
 }
 
-/**
- * Acredita el premio al saldo del usuario e inserta un movimiento de tipo 'premio'.
- * Usa RPC con SECURITY DEFINER para evitar bloqueos de RLS.
- * Si el RPC no existe, hace fallback a UPDATE + INSERT directos.
- */
-async function acreditarPremio(
-  usuarioId: string,
-  monto: number,
-  descripcion: string
-): Promise<void> {
-  const { error: rpcErr } = await supabase.rpc('acreditar_premio', {
-    p_usuario_id: usuarioId,
-    p_monto:      monto,
-    p_descripcion: descripcion,
-  });
-
-  if (!rpcErr) return;
-
-  // Fallback JS si la función RPC aún no está creada en Supabase
-  console.warn('[acreditarPremio] RPC no disponible, usando fallback JS:', rpcErr.message);
-
-  // 1. Leer saldo actual
-  const { data: usuarioData } = await supabase
-    .from('usuarios')
-    .select('saldo')
-    .eq('id', usuarioId)
-    .single();
-
-  const saldoActual = Number(usuarioData?.saldo ?? 0);
-
-  // 2. Actualizar saldo
-  await supabase
-    .from('usuarios')
-    .update({ saldo: saldoActual + monto })
-    .eq('id', usuarioId);
-
-  // 3. Insertar movimiento en historial
-  await supabase.from('movimientos').insert({
-    usuario_id:  usuarioId,
-    tipo:        'premio',
-    monto,
-    descripcion,
-  });
-}
-
 export async function calcularGanador(jornada_id: string): Promise<ResumenGanador | null> {
   const { data: jornada, error: jErr } = await supabase
     .from('jornadas')
@@ -125,12 +80,12 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
     const diferencia = Math.abs(golesPronosticados - golesReales);
 
     return {
-      quiniela_id:        q.id,
-      usuario_id:         q.usuario_id,
-      nombre:             nombrePorId[q.usuario_id] ?? 'Jugador',
+      quiniela_id:         q.id,
+      usuario_id:          q.usuario_id,
+      nombre:              nombrePorId[q.usuario_id] ?? 'Jugador',
       aciertos,
       goles_pronosticados: golesPronosticados,
-      diferencia_goles:   diferencia,
+      diferencia_goles:    diferencia,
     };
   });
 
@@ -141,7 +96,7 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
 
   const posicionadas: PosicionQuiniela[] = posiciones.map((p, i) => ({
     ...p,
-    posicion:     i + 1,
+    posicion:      i + 1,
     premio_ganado: 0,
   }));
 
@@ -150,8 +105,8 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
   const bolsaTotal     = jornada.bolsa_total ?? quinielas.length * precioBase;
   const bolsaPremio    = bolsaTotal * ((100 - porcOrg) / 100);
 
-  const lider    = posicionadas[0];
-  const ganadores = posicionadas.filter(
+  const lider          = posicionadas[0];
+  const ganadores      = posicionadas.filter(
     g => g.aciertos === lider.aciertos && g.diferencia_goles === lider.diferencia_goles
   );
   const empatePerfecto   = ganadores.length > 1;
@@ -159,7 +114,15 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
 
   ganadores.forEach(g => { g.premio_ganado = premioPorGanador; });
 
-  // 1. Guardar posiciones y premios en quinielas
+  // 1. Resetear premio_ganado a 0 en todas las quinielas de la jornada
+  //    Esto garantiza que el trigger se dispare al asignar el valor real
+  const quinielaIds = posicionadas.map(p => p.quiniela_id);
+  await supabase
+    .from('quinielas')
+    .update({ premio_ganado: 0 })
+    .in('id', quinielaIds);
+
+  // 2. Guardar posiciones, aciertos y premios (el trigger se dispara aqui para ganadores)
   for (const pos of posicionadas) {
     await supabase
       .from('quinielas')
@@ -173,22 +136,13 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
       .eq('id', pos.quiniela_id);
   }
 
-  // 2. Acreditar saldo + registrar movimiento para cada ganador
-  for (const ganador of ganadores) {
-    await acreditarPremio(
-      ganador.usuario_id,
-      premioPorGanador,
-      `Premio quiniela: ${jornada.nombre}`
-    );
-  }
-
   // 3. Actualizar jornada con resumen final
   await supabase
     .from('jornadas')
     .update({
       bolsa_total,
-      bolsa_premio:         bolsaPremio,
-      ganador_usuario_id:   empatePerfecto ? null : ganadores[0].usuario_id,
+      bolsa_premio:       bolsaPremio,
+      ganador_usuario_id: empatePerfecto ? null : ganadores[0].usuario_id,
     })
     .eq('id', jornada_id);
 
