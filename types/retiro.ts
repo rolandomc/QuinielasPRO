@@ -47,11 +47,21 @@ export type TipoMovimiento =
   | 'deposito'
   | 'premio'
   | 'retiro'
+  | 'retiro_solicitado'
+  | 'retiro_aprobado'
   | 'retiro_cancelado'
   | 'ajuste_admin';
 
-/** Saldo calculado para mostrar en la pantalla de billetera. */
+/**
+ * Saldo calculado para la pantalla de billetera.
+ *
+ * MODELO (post-fix):
+ *  saldo_total = saldo real en DB (nunca se descuenta al solicitar)
+ *  en_retiro   = SUM de solicitudes pendientes
+ *  disponible  = saldo_total - en_retiro  (lo que puede solicitar)
+ */
 export interface Saldo {
-  disponible: number;
-  en_retiro: number;
+  disponible:   number;
+  en_retiro:    number;
+  saldo_total:  number;
 }

@@ -2,10 +2,11 @@
  * features/retiro/retiroService.ts
  * Capa de datos para solicitudes de retiro y movimientos de billetera.
  *
- * Reglas:
- * - Toda query a Supabase relacionada con retiros vive aquí.
- * - Las pantallas NO importan supabase directamente para retiros.
- * - Los tipos vienen de @/types, no se redeclaran aquí.
+ * MODELO DE SALDO (post-fix):
+ *  - El saldo en DB representa el saldo REAL (disponible + en_retiro).
+ *  - Al SOLICITAR un retiro el saldo NO se descuenta; queda "reservado".
+ *  - Al APROBAR se descuenta. Al RECHAZAR no se toca nada.
+ *  - La vista `saldos` expone: disponible = saldo - SUM(pendientes), en_retiro, saldo_total.
  */
 import { supabase } from '../../lib/supabase';
 import type {
@@ -17,10 +18,7 @@ import type {
 
 // ─── Queries de lectura ────────────────────────────────────────────────────
 
-/**
- * Trae TODAS las solicitudes (panel admin) con datos del usuario via join.
- * Si el join falla por FK ausente usa fallback manual.
- */
+/** Trae TODAS las solicitudes (panel admin) con datos del usuario via join. */
 export async function fetchRetiros(): Promise<SolicitudRetiro[]> {
   const { data, error } = await supabase
     .from('solicitudes_retiro')
@@ -37,7 +35,7 @@ export async function fetchRetiros(): Promise<SolicitudRetiro[]> {
     return _fetchRetirosFallback();
   }
 
-  const sinUsuario = (data ?? []).filter(r => r.usuarios == null);
+  const sinUsuario = (data ?? []).filter(r => (r as any).usuarios == null);
   if (data && data.length > 0 && sinUsuario.length === data.length) {
     console.warn('[fetchRetiros] join vacío, usando fallback.');
     return _fetchRetirosFallback();
@@ -46,7 +44,6 @@ export async function fetchRetiros(): Promise<SolicitudRetiro[]> {
   return (data as unknown as SolicitudRetiro[]) ?? [];
 }
 
-/** Fallback: trae retiros y usuarios por separado, los une en memoria. */
 async function _fetchRetirosFallback(): Promise<SolicitudRetiro[]> {
   const { data: retiros, error } = await supabase
     .from('solicitudes_retiro')
@@ -96,12 +93,39 @@ export async function fetchMovimientos(
     .eq('usuario_id', usuarioId)
     .order('creado_en', { ascending: false })
     .limit(50);
-  if (error) throw error;
+  if (error) {
+    console.warn('[fetchMovimientos]', error.message);
+    return [];
+  }
   return (data as Movimiento[]) ?? [];
 }
 
-/** Saldo + monto en retiro pendiente para la pantalla billetera. */
+/**
+ * Saldo para la pantalla billetera.
+ * Usa la vista `saldos` cuando está disponible; fallback a cálculo manual.
+ *
+ * MODELO CORRECTO:
+ *   disponible  = saldo_total - en_retiro   (lo que puede solicitar)
+ *   en_retiro   = SUM(solicitudes pendientes)
+ *   saldo_total = saldo real en tabla usuarios
+ */
 export async function fetchSaldo(usuarioId: string): Promise<Saldo> {
+  const { data: vista, error: vistaErr } = await supabase
+    .from('saldos')
+    .select('disponible,en_retiro,saldo_total')
+    .eq('usuario_id', usuarioId)
+    .maybeSingle();
+
+  if (!vistaErr && vista) {
+    return {
+      disponible:  Number(vista.disponible  ?? 0),
+      en_retiro:   Number(vista.en_retiro   ?? 0),
+      saldo_total: Number((vista as any).saldo_total ?? 0),
+    };
+  }
+
+  console.warn('[fetchSaldo] vista `saldos` no disponible, usando fallback.', vistaErr?.message);
+
   const [{ data: uData }, { data: rData }] = await Promise.all([
     supabase
       .from('usuarios')
@@ -115,16 +139,20 @@ export async function fetchSaldo(usuarioId: string): Promise<Saldo> {
       .eq('estado', 'pendiente'),
   ]);
 
-  const disponible = Number((uData as any)?.saldo ?? 0);
-  const en_retiro = (rData ?? []).reduce(
+  const saldo_total = Number((uData as any)?.saldo ?? 0);
+  const en_retiro   = (rData ?? []).reduce(
     (acc: number, r: { monto: number }) => acc + Number(r.monto),
     0
   );
 
-  return { disponible, en_retiro };
+  return {
+    disponible:  saldo_total - en_retiro,
+    en_retiro,
+    saldo_total,
+  };
 }
 
-/** ¿El usuario ya tiene una solicitud pendiente? */
+/** ¿El usuario tiene alguna solicitud en estado pendiente? */
 export async function tienePendiente(usuarioId: string): Promise<boolean> {
   const { data } = await supabase
     .from('solicitudes_retiro')
@@ -138,8 +166,8 @@ export async function tienePendiente(usuarioId: string): Promise<boolean> {
 // ─── Mutaciones ───────────────────────────────────────────────────────────
 
 /**
- * Crea una solicitud de retiro.
- * Intenta RPC; si falla aplica lógica directa con rollback de saldo.
+ * Crea una solicitud de retiro via RPC.
+ * El fallback JS replica el NUEVO modelo: NO descuenta saldo al solicitar.
  */
 export async function crearSolicitudRetiro(
   params: CrearRetiroParams
@@ -156,20 +184,30 @@ export async function crearSolicitudRetiro(
 
   console.warn('[crearSolicitudRetiro] RPC no disponible:', rpcErr.message);
 
-  const { data: user, error: userErr } = await supabase
-    .from('usuarios')
-    .select('saldo')
-    .eq('id', params.usuarioId)
-    .single();
+  const [{ data: user, error: userErr }, { data: pendientes }] =
+    await Promise.all([
+      supabase.from('usuarios').select('saldo').eq('id', params.usuarioId).single(),
+      supabase
+        .from('solicitudes_retiro')
+        .select('monto')
+        .eq('usuario_id', params.usuarioId)
+        .eq('estado', 'pendiente'),
+    ]);
 
   if (userErr || !user) throw new Error('No se encontró el usuario.');
-  if ((user.saldo ?? 0) < params.monto) throw new Error('Saldo insuficiente.');
 
-  const { error: saldoErr } = await supabase
-    .from('usuarios')
-    .update({ saldo: user.saldo - params.monto })
-    .eq('id', params.usuarioId);
-  if (saldoErr) throw saldoErr;
+  const saldo_total = Number(user.saldo ?? 0);
+  const en_retiro   = (pendientes ?? []).reduce(
+    (acc: number, r: { monto: number }) => acc + Number(r.monto),
+    0
+  );
+  const disponible  = saldo_total - en_retiro;
+
+  if (disponible < params.monto) {
+    throw new Error(
+      `Saldo insuficiente. Disponible: $${disponible.toFixed(2)} (en retiro: $${en_retiro.toFixed(2)}).`
+    );
+  }
 
   const { error: insertErr } = await supabase
     .from('solicitudes_retiro')
@@ -183,19 +221,14 @@ export async function crearSolicitudRetiro(
       numero_tarjeta: params.numero_tarjeta,
     });
 
-  if (insertErr) {
-    // Rollback: restaurar saldo
-    await supabase
-      .from('usuarios')
-      .update({ saldo: user.saldo })
-      .eq('id', params.usuarioId);
-    throw insertErr;
-  }
+  if (insertErr) throw insertErr;
 }
 
 /**
  * Aprueba o rechaza un retiro (panel admin).
- * Intenta RPC; si falla aplica lógica directa.
+ * NUEVO MODELO:
+ *  - Aprobar  → descuenta saldo ahora
+ *  - Rechazar → no toca saldo (nunca se descontó)
  */
 export async function resolverRetiro(
   retiroId: string,
@@ -212,8 +245,6 @@ export async function resolverRetiro(
 
   console.warn('[resolverRetiro] RPC no disponible:', rpcErr.message);
 
-  const nuevoEstado = aprobar ? 'aprobado' : 'rechazado';
-
   const { data: retiro, error: fetchErr } = await supabase
     .from('solicitudes_retiro')
     .select('usuario_id,monto,estado')
@@ -223,6 +254,8 @@ export async function resolverRetiro(
   if (fetchErr || !retiro) throw new Error('No se encontró la solicitud.');
   if (retiro.estado !== 'pendiente') throw new Error('Esta solicitud ya fue procesada.');
 
+  const nuevoEstado = aprobar ? 'aprobado' : 'rechazado';
+
   const { error: updateErr } = await supabase
     .from('solicitudes_retiro')
     .update({
@@ -231,19 +264,29 @@ export async function resolverRetiro(
       resuelto_en: new Date().toISOString(),
     })
     .eq('id', retiroId);
+
   if (updateErr) throw updateErr;
 
-  if (!aprobar) {
-    const { data: user } = await supabase
+  if (aprobar) {
+    const { data: user, error: userErr } = await supabase
       .from('usuarios')
       .select('saldo')
       .eq('id', retiro.usuario_id)
       .single();
-    if (user) {
+
+    if (userErr || !user) throw new Error('No se encontró el usuario para descontar saldo.');
+    if (Number(user.saldo) < Number(retiro.monto)) {
       await supabase
-        .from('usuarios')
-        .update({ saldo: (user.saldo ?? 0) + retiro.monto })
-        .eq('id', retiro.usuario_id);
+        .from('solicitudes_retiro')
+        .update({ estado: 'pendiente', resuelto_en: null, nota_admin: null })
+        .eq('id', retiroId);
+      throw new Error('Saldo insuficiente al momento de aprobar.');
     }
+
+    await supabase
+      .from('usuarios')
+      .update({ saldo: Number(user.saldo) - Number(retiro.monto) })
+      .eq('id', retiro.usuario_id);
   }
+  // RECHAZAR: no se toca el saldo
 }

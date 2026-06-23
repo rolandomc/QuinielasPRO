@@ -1,9 +1,13 @@
 /**
  * features/retiro/useBilletera.ts
  *
- * Wrapper delgado sobre useBilletera (useRetiro) para la pantalla
- * solicitar-retiro.tsx que necesita una API más simple:
- *   { saldo, tienePendiente, loading, enviarSolicitud }
+ * Wrapper delgado sobre useRetiro para la pantalla solicitar-retiro.tsx.
+ * Expone: saldo (disponible), saldoTotal, enRetiro, tienePendiente, loading, enviarSolicitud.
+ *
+ * MODELO CORRECTO (post-fix):
+ *   saldo       = disponible  (lo que puede solicitar ahora)
+ *   saldoTotal  = saldo real en DB (disponible + en_retiro)
+ *   enRetiro    = SUM(solicitudes pendientes)
  */
 import { useCallback } from 'react';
 import { useBilletera as _useBilletera } from './useRetiro';
@@ -19,13 +23,12 @@ export function useBilletera() {
     solicitarRetiro,
   } = _useBilletera(usuario?.id);
 
-  // Hay solicitud pendiente si existe al menos un retiro en estado 'pendiente'
   const tienePendiente = retiros.some(r => r.estado === 'pendiente');
 
-  // Saldo disponible (número simple que espera la pantalla)
-  const saldoDisponible = saldo?.disponible ?? 0;
+  const saldoDisponible = saldo?.disponible  ?? 0;
+  const saldoTotal      = saldo?.saldo_total ?? 0;
+  const enRetiro        = saldo?.en_retiro   ?? 0;
 
-  // API simplificada que espera solicitar-retiro.tsx
   const enviarSolicitud = useCallback(
     async (datos: Omit<CrearRetiroParams, 'usuarioId'>) => {
       await solicitarRetiro(datos);
@@ -35,6 +38,8 @@ export function useBilletera() {
 
   return {
     saldo:           saldoDisponible,
+    saldoTotal,
+    enRetiro,
     tienePendiente,
     loading,
     enviarSolicitud,
