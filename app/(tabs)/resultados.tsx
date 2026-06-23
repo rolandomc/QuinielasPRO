@@ -1,6 +1,9 @@
 /**
  * app/(tabs)/resultados.tsx — Clean Architecture
  * Usa NeonCard, ScreenHeader, EmptyState, LoadingScreen de components/ui/
+ *
+ * FIX: auto-selecciona la jornada con estado 'en_proceso' o 'activa'.
+ *      Si no hay ninguna, usa la más reciente.
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
@@ -29,6 +32,20 @@ type Jornada = {
 };
 type Quiniela = { id: string; estado_pago: string; aciertos: number | null; jornada_id: string };
 type Posicion = { nombre: string; username: string; aciertos: number; posicion: number };
+
+/** Devuelve la jornada prioritaria:
+ *  1. estado = 'en_proceso'
+ *  2. estado = 'activa'
+ *  3. la primera de la lista (más reciente por orden DESC)
+ */
+function elegirJornadaInicial(lista: Jornada[]): Jornada | null {
+  if (lista.length === 0) return null;
+  return (
+    lista.find(j => j.estado === 'en_proceso') ??
+    lista.find(j => j.estado === 'activa') ??
+    lista[0]
+  );
+}
 
 export default function ResultadosScreen() {
   const { user } = useAuth();
@@ -67,12 +84,18 @@ export default function ResultadosScreen() {
 
   const cargar = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase.from('jornadas').select('id,nombre,estado,bolsa_total,porcentaje_organizador').order('creado_at', { ascending: false }).limit(20);
+    // Carga todas las jornadas (sin filtrar por estado) para mostrar historial
+    const { data } = await supabase
+      .from('jornadas')
+      .select('id,nombre,estado,bolsa_total,porcentaje_organizador')
+      .order('creado_at', { ascending: false })
+      .limit(20);
     const lista = data ?? [];
     setJornadas(lista);
-    const primera = lista[0] ?? null;
-    setJornadaSel(primera);
-    if (primera) await cargarJornada(primera);
+    // FIX: elegir jornada prioritaria (en_proceso > activa > más reciente)
+    const prioritaria = elegirJornadaInicial(lista);
+    setJornadaSel(prioritaria);
+    if (prioritaria) await cargarJornada(prioritaria);
   }, [user, cargarJornada]);
 
   useEffect(() => { setLoading(true); cargar().finally(() => setLoading(false)); }, [cargar]);
@@ -121,6 +144,9 @@ export default function ResultadosScreen() {
                         activeOpacity={0.75}
                       >
                         <Text style={[s.jornadaChipTexto, { color: activa ? C.accent : C.textSub }]} numberOfLines={1}>{j.nombre}</Text>
+                        {j.estado === 'en_proceso' && (
+                          <View style={[s.estadoDot, { backgroundColor: C.green }]} />
+                        )}
                       </TouchableOpacity>
                     );
                   })}
@@ -257,8 +283,9 @@ export default function ResultadosScreen() {
 const s = StyleSheet.create({
   root:            { flex: 1 },
   marginH:         { marginHorizontal: 16, marginBottom: 12 },
-  jornadaChip:     { borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  jornadaChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   jornadaChipTexto:{ fontSize: 12, fontWeight: '600' },
+  estadoDot:       { width: 7, height: 7, borderRadius: 4 },
   resumenRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
   resumenLabel:    { fontSize: 12, fontWeight: '600', marginBottom: 2 },
   resumenMonto:    { fontSize: 20, fontWeight: '900' },

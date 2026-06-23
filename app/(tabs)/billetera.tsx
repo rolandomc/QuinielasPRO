@@ -2,12 +2,15 @@
  * app/(tabs)/billetera.tsx
  *
  * Pantalla de billetera — Clean Architecture:
- *  - Lógica de datos:       features/retiro/useRetiro.ts
+ *  - Lógica de datos:       features/retiro/application/useBilletera.ts
  *  - Lógica de UI pura:     features/retiro/retiroUtils.ts
  *  - Componentes UI neón:   components/ui/
  *  - Esta pantalla solo ensambla y conecta.
+ *
+ * FIX: modalVisible manejado localmente (no en el hook).
+ *      useBilletera() sin argumentos — usa AuthContext internamente.
  */
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, RefreshControl, StatusBar, Modal,
@@ -15,15 +18,23 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { NeonCard, NeonButton, ScreenHeader, EmptyState, LoadingScreen, StatusPill } from '../../components/ui';
-import { useBilletera } from '../../features/retiro/useRetiro';
+import { useBilletera } from '../../features/retiro/application/useBilletera';
 import {
   formatFecha, formatMonto, movimientoConfig,
   estadoConfig, estadoLabel, validarFormularioRetiro,
 } from '../../features/retiro/retiroUtils';
-import type { CrearRetiroParams, EstadoRetiro } from '../../types';
+import type { EstadoRetiro } from '../../types';
+
+// ─── Tipos locales ────────────────────────────────────────────────────────────
+type DatosRetiro = {
+  monto: number;
+  nombre_titular: string;
+  banco: string;
+  clabe: string | null;
+  numero_tarjeta: string | null;
+};
 
 // ─── Modal de solicitud ──────────────────────────────────────────────────────
 
@@ -32,7 +43,7 @@ function ModalRetiro({
 }: {
   visible: boolean;
   onClose: () => void;
-  onEnviar: (datos: Omit<CrearRetiroParams, 'usuarioId'>) => Promise<void>;
+  onEnviar: (datos: DatosRetiro) => Promise<void>;
   saldoDisponible: number;
 }) {
   const { colors: C } = useTheme();
@@ -53,15 +64,21 @@ function ModalRetiro({
     const res = validarFormularioRetiro({ monto, nombre, banco, clabe, tarjeta, usarClabe, saldoDisponible });
     if (!res.ok) { Alert.alert('Error', res.msg); return; }
     setSending(true);
-    await onEnviar({
-      monto:          parseFloat(monto),
-      nombre_titular: nombre.trim(),
-      banco:          banco.trim(),
-      clabe:          usarClabe ? clabe.replace(/\s/g, '') : null,
-      numero_tarjeta: !usarClabe ? tarjeta.replace(/\s/g, '') : null,
-    });
-    setSending(false);
-    limpiar();
+    try {
+      await onEnviar({
+        monto:          parseFloat(monto),
+        nombre_titular: nombre.trim(),
+        banco:          banco.trim(),
+        clabe:          usarClabe ? clabe.replace(/\s/g, '') : null,
+        numero_tarjeta: !usarClabe ? tarjeta.replace(/\s/g, '') : null,
+      });
+      limpiar();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo enviar la solicitud.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -115,7 +132,7 @@ function ModalRetiro({
             />
 
             <View style={mS.toggleRow}>
-              {['CLABE', 'Tarjeta'].map((opt, i) => {
+              {(['CLABE', 'Tarjeta'] as const).map((opt, i) => {
                 const active = i === 0 ? usarClabe : !usarClabe;
                 return (
                   <TouchableOpacity
@@ -183,24 +200,32 @@ const mS = StyleSheet.create({
 // ─── Pantalla principal ──────────────────────────────────────────────────────
 
 export default function BilleteraScreen() {
-  const { usuario } = useAuth();
   const { colors: C } = useTheme();
+
+  // FIX: modalVisible es estado LOCAL — no viene del hook.
+  // useBilletera() sin args — toma userId de AuthContext internamente.
+  const [modalVisible, setModalVisible] = useState(false);
   const [tab, setTab] = useState<'movimientos' | 'retiros'>('movimientos');
 
   const {
-    saldo, movimientos, retiros, loading, refreshing,
-    modalVisible, cargar, onRefresh, solicitarRetiro, setModalVisible,
-  } = useBilletera(usuario?.id);
+    saldo, saldoTotal, enRetiro,
+    movimientos, retiros,
+    loading, refreshing,
+    cargar, onRefresh, enviarSolicitud,
+  } = useBilletera();
 
-  useEffect(() => { cargar(); }, [cargar]);
   useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
 
   if (loading) return <LoadingScreen />;
 
-  const disponible = saldo?.disponible ?? 0;
-  const enRetiro   = saldo?.en_retiro  ?? 0;
-  const total      = disponible + enRetiro;
+  const disponible = saldo      ?? 0;
+  const total      = saldoTotal ?? 0;
+  const enRet      = enRetiro   ?? 0;
   const pendientes = retiros.filter(r => r.estado === 'pendiente').length;
+
+  const handleEnviar = async (datos: DatosRetiro) => {
+    await enviarSolicitud(datos);
+  };
 
   return (
     <View style={[s.root, { backgroundColor: C.bg }]}>
@@ -219,7 +244,7 @@ export default function BilleteraScreen() {
 
           <View style={[s.saldoDesglose, { backgroundColor: C.bg }]}>
             {[{ label: 'Disponible', monto: disponible, color: C.green },
-              { label: 'En retiro',  monto: enRetiro,   color: C.orange }]
+              { label: 'En retiro',  monto: enRet,      color: C.orange }]
               .map((item, i) => (
                 <React.Fragment key={item.label}>
                   {i > 0 && <View style={[s.saldoDivider, { backgroundColor: C.cardBorder }]} />}
@@ -347,7 +372,7 @@ export default function BilleteraScreen() {
       <ModalRetiro
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        onEnviar={solicitarRetiro}
+        onEnviar={handleEnviar}
         saldoDisponible={disponible}
       />
     </View>

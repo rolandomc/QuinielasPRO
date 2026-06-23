@@ -1,22 +1,27 @@
 /**
  * app/(tabs)/perfil.tsx — Clean Architecture
  * Usa NeonCard, ScreenHeader, LoadingScreen de components/ui/
+ *
+ * FIX: mis-pronosticos ahora busca la jornada más reciente del usuario
+ *      y navega pasando jornada_id + jornada_nombre como params.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, RefreshControl, StatusBar, Alert,
+  TouchableOpacity, RefreshControl, StatusBar, Alert, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { supabase } from '../../lib/supabase';
 import { NeonCard, ScreenHeader, LoadingScreen } from '../../components/ui';
 
 export default function PerfilScreen() {
   const { usuario, user, signOut, loading, refreshUsuario } = useAuth();
   const { colors: C, theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const [loadingPronosticos, setLoadingPronosticos] = useState(false);
 
   useFocusEffect(useCallback(() => { refreshUsuario?.(); }, [refreshUsuario]));
 
@@ -24,11 +29,70 @@ export default function PerfilScreen() {
 
   const inicial = (usuario?.nombre ?? usuario?.username ?? '?')[0].toUpperCase();
 
+  /**
+   * FIX: busca la jornada más reciente donde el usuario tiene quiniela,
+   * luego navega a mis-pronosticos con los params necesarios.
+   */
+  const irAMisPronosticos = async () => {
+    if (!user) return;
+    setLoadingPronosticos(true);
+    try {
+      // Buscar la quiniela más reciente del usuario
+      const { data: quinielaData } = await supabase
+        .from('quinielas')
+        .select('jornada_id')
+        .eq('usuario_id', user.id)
+        .order('creado_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!quinielaData?.jornada_id) {
+        Alert.alert('Sin pronósticos', 'Aún no tienes ninguna quiniela registrada.');
+        return;
+      }
+
+      // Obtener nombre de la jornada
+      const { data: jornadaData } = await supabase
+        .from('jornadas')
+        .select('id,nombre')
+        .eq('id', quinielaData.jornada_id)
+        .maybeSingle();
+
+      router.push({
+        pathname: '/mis-pronosticos',
+        params: {
+          jornada_id:     jornadaData?.id     ?? quinielaData.jornada_id,
+          jornada_nombre: jornadaData?.nombre ?? 'Mis pronósticos',
+        },
+      });
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo cargar los pronósticos.');
+    } finally {
+      setLoadingPronosticos(false);
+    }
+  };
+
   const opciones = [
-    { icon: 'trophy-outline',   label: 'Mis pronósticos', onPress: () => router.push('/mis-pronosticos') },
-    { icon: 'wallet-outline',   label: 'Mi billetera',    onPress: () => router.push('/(tabs)/billetera') },
-    ...(usuario?.es_admin ? [{ icon: 'shield-outline', label: 'Panel admin', onPress: () => router.push('/admin') }] : []),
-    { icon: theme === 'dark' ? 'sunny-outline' : 'moon-outline', label: theme === 'dark' ? 'Modo claro' : 'Modo oscuro', onPress: toggleTheme },
+    {
+      icon: 'trophy-outline',
+      label: 'Mis pronósticos',
+      onPress: irAMisPronosticos,
+      loading: loadingPronosticos,
+    },
+    {
+      icon: 'wallet-outline',
+      label: 'Mi billetera',
+      onPress: () => router.push('/(tabs)/billetera'),
+    },
+    ...(usuario?.es_admin
+      ? [{ icon: 'shield-outline', label: 'Panel admin', onPress: () => router.push('/admin') }]
+      : []
+    ),
+    {
+      icon: theme === 'dark' ? 'sunny-outline' : 'moon-outline',
+      label: theme === 'dark' ? 'Modo claro' : 'Modo oscuro',
+      onPress: toggleTheme,
+    },
   ];
 
   return (
@@ -60,7 +124,9 @@ export default function PerfilScreen() {
           <Text style={[s.seccionTitulo, { color: C.textSub }]}>CUENTA</Text>
           {[['mail-outline', 'Email', user?.email ?? '—'],
             ['person-outline', 'Usuario', `@${usuario?.username ?? '—'}`],
-            ['calendar-outline', 'Miembro desde', usuario?.creado_en ? new Date(usuario.creado_en).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'],
+            ['calendar-outline', 'Miembro desde', usuario?.creado_en
+              ? new Date(usuario.creado_en).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })
+              : '—'],
           ].map(([icon, label, value]) => (
             <View key={label as string} style={[s.infoRow, { borderBottomColor: C.cardBorder }]}>
               <Ionicons name={icon as any} size={16} color={C.textSub} />
@@ -81,9 +147,13 @@ export default function PerfilScreen() {
               style={[s.opcionRow, { borderBottomColor: C.cardBorder }, i === opciones.length - 1 && { borderBottomWidth: 0 }]}
               onPress={op.onPress}
               activeOpacity={0.7}
+              disabled={'loading' in op && op.loading}
             >
               <View style={[s.opcionIcon, { backgroundColor: C.accentDim }]}>
-                <Ionicons name={op.icon as any} size={18} color={C.accent} />
+                {'loading' in op && op.loading
+                  ? <ActivityIndicator size="small" color={C.accent} />
+                  : <Ionicons name={op.icon as any} size={18} color={C.accent} />
+                }
               </View>
               <Text style={[s.opcionLabel, { color: C.text }]}>{op.label}</Text>
               <Ionicons name="chevron-forward" size={16} color={C.textSub} />
