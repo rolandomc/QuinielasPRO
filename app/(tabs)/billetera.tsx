@@ -37,6 +37,7 @@ type SolicitudRetiro = {
   numero_tarjeta: string | null;
   nota_admin: string | null;
   creado_en: string;
+  resuelto_en: string | null;
 };
 
 const ICONOS_TIPO: Record<string, { icon: string; color: string; label: string }> = {
@@ -68,13 +69,13 @@ function ModalRetiro({
   onEnviar: (datos: any) => Promise<void>;
   saldoDisponible: number;
 }) {
-  const [monto, setMonto]    = useState('');
-  const [nombre, setNombre]  = useState('');
-  const [banco, setBanco]    = useState('');
-  const [clabe, setClabe]    = useState('');
-  const [tarjeta, setTarjeta] = useState('');
+  const [monto, setMonto]       = useState('');
+  const [nombre, setNombre]     = useState('');
+  const [banco, setBanco]       = useState('');
+  const [clabe, setClabe]       = useState('');
+  const [tarjeta, setTarjeta]   = useState('');
   const [usarClabe, setUsarClabe] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]   = useState(false);
 
   const limpiar = () => {
     setMonto(''); setNombre(''); setBanco('');
@@ -89,9 +90,9 @@ function ModalRetiro({
       return Alert.alert('Saldo insuficiente', `Tu saldo disponible es $${saldoDisponible.toFixed(2)}`);
     if (!nombre.trim()) return Alert.alert('Error', 'Ingresa el nombre del titular.');
     if (!banco.trim())  return Alert.alert('Error', 'Ingresa el nombre del banco.');
-    if (usarClabe && clabe.replace(/\s/g,'').length !== 18)
+    if (usarClabe && clabe.replace(/\s/g, '').length !== 18)
       return Alert.alert('Error', 'La CLABE debe tener 18 dígitos.');
-    if (!usarClabe && tarjeta.replace(/\s/g,'').length < 16)
+    if (!usarClabe && tarjeta.replace(/\s/g, '').length < 16)
       return Alert.alert('Error', 'El número de tarjeta debe tener al menos 16 dígitos.');
 
     setLoading(true);
@@ -99,8 +100,8 @@ function ModalRetiro({
       monto: montoNum,
       nombre_titular: nombre.trim(),
       banco: banco.trim(),
-      clabe: usarClabe ? clabe.replace(/\s/g,'') : null,
-      numero_tarjeta: !usarClabe ? tarjeta.replace(/\s/g,'') : null,
+      clabe: usarClabe ? clabe.replace(/\s/g, '') : null,
+      numero_tarjeta: !usarClabe ? tarjeta.replace(/\s/g, '') : null,
     });
     setLoading(false);
     limpiar();
@@ -124,12 +125,14 @@ function ModalRetiro({
           <View style={modalStyles.saldoInfo}>
             <Ionicons name="wallet-outline" size={14} color={C.green} />
             <Text style={modalStyles.saldoInfoText}>
-              Disponible: <Text style={{ color: C.green, fontWeight: '800' }}>${saldoDisponible.toFixed(2)}</Text>
+              Disponible:{' '}
+              <Text style={{ color: C.green, fontWeight: '800' }}>
+                ${saldoDisponible.toFixed(2)}
+              </Text>
             </Text>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Monto */}
             <Text style={modalStyles.label}>Monto a retirar</Text>
             <View style={modalStyles.inputMontoWrap}>
               <Text style={modalStyles.inputMontoPeso}>$</Text>
@@ -143,7 +146,6 @@ function ModalRetiro({
               />
             </View>
 
-            {/* Nombre */}
             <Text style={modalStyles.label}>Nombre completo del titular</Text>
             <TextInput
               style={modalStyles.input}
@@ -154,7 +156,6 @@ function ModalRetiro({
               autoCapitalize="words"
             />
 
-            {/* Banco */}
             <Text style={modalStyles.label}>Banco</Text>
             <TextInput
               style={modalStyles.input}
@@ -165,7 +166,6 @@ function ModalRetiro({
               autoCapitalize="words"
             />
 
-            {/* Toggle CLABE / Tarjeta */}
             <View style={modalStyles.toggleRow}>
               <TouchableOpacity
                 style={[modalStyles.toggleBtn, usarClabe && modalStyles.toggleActivo]}
@@ -234,27 +234,28 @@ function ModalRetiro({
     </Modal>
   );
 }
+
 const modalStyles = StyleSheet.create({
-  overlay:        { flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.6)' },
-  sheet:          { backgroundColor:C.card, borderTopLeftRadius:24, borderTopRightRadius:24, padding:24, maxHeight:'90%' },
-  handle:         { width:40, height:4, backgroundColor:C.cardBorder, borderRadius:2, alignSelf:'center', marginBottom:16 },
-  headerRow:      { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:16 },
-  titulo:         { color:C.text, fontSize:20, fontWeight:'900' },
-  saldoInfo:      { flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'rgba(0,200,151,0.08)', borderRadius:10, padding:10, marginBottom:16, borderWidth:1, borderColor:'rgba(0,200,151,0.2)' },
-  saldoInfoText:  { color:C.textSub, fontSize:13 },
-  label:          { color:C.textSub, fontSize:12, fontWeight:'700', marginBottom:6, marginTop:14 },
-  input:          { backgroundColor:C.bg, borderWidth:1.5, borderColor:C.cardBorder, borderRadius:10, padding:12, color:C.text, fontSize:15 },
-  inputMontoWrap: { flexDirection:'row', alignItems:'center', backgroundColor:C.bg, borderWidth:1.5, borderColor:C.accent, borderRadius:10, paddingHorizontal:12 },
-  inputMontoPeso: { color:C.accent, fontSize:22, fontWeight:'900', marginRight:4 },
-  inputMonto:     { flex:1, color:C.text, fontSize:28, fontWeight:'900', paddingVertical:10 },
-  toggleRow:      { flexDirection:'row', marginTop:14, marginBottom:2, gap:8 },
-  toggleBtn:      { flex:1, padding:10, borderRadius:10, borderWidth:1.5, borderColor:C.cardBorder, alignItems:'center' },
-  toggleActivo:   { borderColor:C.accent, backgroundColor:C.accentDim },
-  toggleTexto:    { color:C.textSub, fontWeight:'700' },
-  toggleTextoActivo: { color:C.accent },
-  aviso:          { color:C.textSub, fontSize:11, lineHeight:16, marginTop:16, padding:10, backgroundColor:'rgba(255,159,67,0.07)', borderRadius:8, borderWidth:1, borderColor:'rgba(255,159,67,0.2)' },
-  btnEnviar:      { flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8, backgroundColor:C.accent, borderRadius:12, padding:16, marginTop:20 },
-  btnEnviarTexto: { color:'#fff', fontWeight:'800', fontSize:16 },
+  overlay:           { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
+  sheet:             { backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
+  handle:            { width: 40, height: 4, backgroundColor: C.cardBorder, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  headerRow:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  titulo:            { color: C.text, fontSize: 20, fontWeight: '900' },
+  saldoInfo:         { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,200,151,0.08)', borderRadius: 10, padding: 10, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(0,200,151,0.2)' },
+  saldoInfoText:     { color: C.textSub, fontSize: 13 },
+  label:             { color: C.textSub, fontSize: 12, fontWeight: '700', marginBottom: 6, marginTop: 14 },
+  input:             { backgroundColor: C.bg, borderWidth: 1.5, borderColor: C.cardBorder, borderRadius: 10, padding: 12, color: C.text, fontSize: 15 },
+  inputMontoWrap:    { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderWidth: 1.5, borderColor: C.accent, borderRadius: 10, paddingHorizontal: 12 },
+  inputMontoPeso:    { color: C.accent, fontSize: 22, fontWeight: '900', marginRight: 4 },
+  inputMonto:        { flex: 1, color: C.text, fontSize: 28, fontWeight: '900', paddingVertical: 10 },
+  toggleRow:         { flexDirection: 'row', marginTop: 14, marginBottom: 2, gap: 8 },
+  toggleBtn:         { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1.5, borderColor: C.cardBorder, alignItems: 'center' },
+  toggleActivo:      { borderColor: C.accent, backgroundColor: C.accentDim },
+  toggleTexto:       { color: C.textSub, fontWeight: '700' },
+  toggleTextoActivo: { color: C.accent },
+  aviso:             { color: C.textSub, fontSize: 11, lineHeight: 16, marginTop: 16, padding: 10, backgroundColor: 'rgba(255,159,67,0.07)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,159,67,0.2)' },
+  btnEnviar:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 12, padding: 16, marginTop: 20 },
+  btnEnviarTexto:    { color: '#fff', fontWeight: '800', fontSize: 16 },
 });
 
 // ─── Pantalla principal ───────────────────────────────────────────────────────
@@ -262,24 +263,48 @@ export default function BilleteraScreen() {
   const { user } = useAuth();
   const insets   = useSafeAreaInsets();
 
-  const [saldo, setSaldo]             = useState<Saldo | null>(null);
-  const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
-  const [retiros, setRetiros]         = useState<SolicitudRetiro[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [refreshing, setRefreshing]   = useState(false);
+  const [saldo, setSaldo]               = useState<Saldo | null>(null);
+  const [movimientos, setMovimientos]   = useState<Movimiento[]>([]);
+  const [retiros, setRetiros]           = useState<SolicitudRetiro[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [tab, setTab]                 = useState<'movimientos' | 'retiros'>('movimientos');
+  const [tab, setTab]                   = useState<'movimientos' | 'retiros'>('movimientos');
 
+  // ── Carga de datos ──────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
     if (!user) return;
 
     const [{ data: sData }, { data: mData }, { data: rData }] = await Promise.all([
-      supabase.from('saldos').select('disponible,en_retiro').eq('usuario_id', user.id).maybeSingle(),
-      supabase.from('movimientos').select('*').eq('usuario_id', user.id).order('creado_en', { ascending: false }).limit(50),
-      supabase.from('solicitudes_retiro').select('*').eq('usuario_id', user.id).order('creado_en', { ascending: false }),
+      // FIX: lee saldo directamente desde public.usuarios (la columna real)
+      supabase
+        .from('usuarios')
+        .select('saldo')
+        .eq('id', user.id)
+        .maybeSingle(),
+
+      supabase
+        .from('movimientos')
+        .select('*')
+        .eq('usuario_id', user.id)
+        .order('creado_en', { ascending: false })
+        .limit(50),
+
+      supabase
+        .from('solicitudes_retiro')
+        .select('*')
+        .eq('usuario_id', user.id)
+        .order('creado_en', { ascending: false }),
     ]);
 
-    setSaldo(sData ?? { disponible: 0, en_retiro: 0 });
+    // Calcular en_retiro sumando solicitudes pendientes
+    const enRetiro = (rData || [])
+      .filter((r: SolicitudRetiro) => r.estado === 'pendiente')
+      .reduce((acc: number, r: SolicitudRetiro) => acc + Number(r.monto), 0);
+
+    const saldoTotal = Number((sData as any)?.saldo ?? 0);
+
+    setSaldo({ disponible: saldoTotal, en_retiro: enRetiro });
     setMovimientos(mData || []);
     setRetiros(rData || []);
   }, [user]);
@@ -289,6 +314,7 @@ export default function BilleteraScreen() {
     cargar().finally(() => setLoading(false));
   }, [cargar]);
 
+  // Recarga automática al volver a esta pantalla
   useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
 
   const onRefresh = async () => {
@@ -297,20 +323,24 @@ export default function BilleteraScreen() {
     setRefreshing(false);
   };
 
+  // ── Solicitar retiro ────────────────────────────────────────────────────────
+  // FIX: parámetros corregidos — p_numero_tarjeta (no p_tarjeta), sin p_usuario_id
   const solicitarRetiro = async (datos: any) => {
     if (!user) return;
     const { error } = await supabase.rpc('solicitar_retiro', {
-      p_usuario_id:     user.id,
       p_monto:          datos.monto,
       p_nombre_titular: datos.nombre_titular,
       p_banco:          datos.banco,
-      p_clabe:          datos.clabe,
-      p_tarjeta:        datos.numero_tarjeta,
+      p_clabe:          datos.clabe ?? null,
+      p_numero_tarjeta: datos.numero_tarjeta ?? null,
     });
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      Alert.alert('✅ Solicitud enviada', 'Tu solicitud fue recibida. El administrador la revisará pronto.');
+      Alert.alert(
+        '✅ Solicitud enviada',
+        'Tu solicitud fue recibida. El administrador la revisará pronto.',
+      );
       setModalVisible(false);
       await cargar();
     }
@@ -332,7 +362,14 @@ export default function BilleteraScreen() {
 
       <ScrollView
         style={s.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} colors={[C.accent]} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={C.accent}
+            colors={[C.accent]}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* HEADER */}
@@ -389,9 +426,11 @@ export default function BilleteraScreen() {
           >
             <Ionicons name="time" size={14} color={tab === 'retiros' ? C.accent : C.textSub} />
             <Text style={[s.tabTexto, tab === 'retiros' && s.tabTextoActivo]}>Retiros</Text>
-            {retiros.filter(r => r.estado === 'pendiente').length > 0 && (
+            {retiros.filter((r) => r.estado === 'pendiente').length > 0 && (
               <View style={s.badge}>
-                <Text style={s.badgeTexto}>{retiros.filter(r => r.estado === 'pendiente').length}</Text>
+                <Text style={s.badgeTexto}>
+                  {retiros.filter((r) => r.estado === 'pendiente').length}
+                </Text>
               </View>
             )}
           </TouchableOpacity>
@@ -404,9 +443,10 @@ export default function BilleteraScreen() {
               <View style={s.empty}>
                 <Text style={s.emptyEmoji}>📭</Text>
                 <Text style={s.emptyTexto}>Sin movimientos aún</Text>
+                <Text style={s.emptyHint}>Aquí aparecerán depósitos, premios y retiros</Text>
               </View>
-            ) : movimientos.map(m => {
-              const info   = ICONOS_TIPO[m.tipo] ?? { icon: 'ellipse', color: C.textSub, label: m.tipo };
+            ) : movimientos.map((m) => {
+              const info     = ICONOS_TIPO[m.tipo] ?? { icon: 'ellipse', color: C.textSub, label: m.tipo };
               const positivo = m.monto >= 0;
               return (
                 <View key={m.id} style={s.movRow}>
@@ -415,7 +455,9 @@ export default function BilleteraScreen() {
                   </View>
                   <View style={s.movInfo}>
                     <Text style={s.movTipo}>{info.label}</Text>
-                    {m.descripcion ? <Text style={s.movDesc} numberOfLines={1}>{m.descripcion}</Text> : null}
+                    {m.descripcion ? (
+                      <Text style={s.movDesc} numberOfLines={1}>{m.descripcion}</Text>
+                    ) : null}
                     <Text style={s.movFecha}>{formatFecha(m.creado_en)}</Text>
                   </View>
                   <Text style={[s.movMonto, { color: positivo ? C.green : C.red }]}>
@@ -435,27 +477,61 @@ export default function BilleteraScreen() {
                 <Text style={s.emptyEmoji}>📭</Text>
                 <Text style={s.emptyTexto}>Sin solicitudes de retiro</Text>
               </View>
-            ) : retiros.map(r => {
-              const estadoColor = r.estado === 'aprobado' ? C.green : r.estado === 'rechazado' ? C.red : C.orange;
-              const estadoLabel = r.estado === 'aprobado' ? '✅ Aprobado' : r.estado === 'rechazado' ? '❌ Rechazado' : '⏳ Pendiente';
+            ) : retiros.map((r) => {
+              const estadoColor =
+                r.estado === 'aprobado'  ? C.green  :
+                r.estado === 'rechazado' ? C.red    : C.orange;
+              const estadoLabel =
+                r.estado === 'aprobado'  ? '✅ Aprobado'  :
+                r.estado === 'rechazado' ? '❌ Rechazado' : '⏳ Pendiente';
+
               return (
                 <View key={r.id} style={s.retiroCard}>
+                  {/* Fila principal: monto + estado */}
                   <View style={s.retiroHeaderRow}>
                     <Text style={s.retiroMonto}>${r.monto.toFixed(2)}</Text>
                     <View style={[s.estadoPill, { borderColor: estadoColor, backgroundColor: estadoColor + '18' }]}>
                       <Text style={[s.estadoTexto, { color: estadoColor }]}>{estadoLabel}</Text>
                     </View>
                   </View>
+
+                  {/* Datos bancarios */}
                   <View style={s.retiroDatos}>
-                    <Text style={s.retiroDato}><Text style={s.retiroDatoLabel}>Titular: </Text>{r.nombre_titular}</Text>
-                    <Text style={s.retiroDato}><Text style={s.retiroDatoLabel}>Banco: </Text>{r.banco}</Text>
-                    {r.clabe         && <Text style={s.retiroDato}><Text style={s.retiroDatoLabel}>CLABE: </Text>****{r.clabe.slice(-4)}</Text>}
-                    {r.numero_tarjeta && <Text style={s.retiroDato}><Text style={s.retiroDatoLabel}>Tarjeta: </Text>****{r.numero_tarjeta.slice(-4)}</Text>}
+                    <Text style={s.retiroDato}>
+                      <Text style={s.retiroDatoLabel}>Titular: </Text>{r.nombre_titular}
+                    </Text>
+                    <Text style={s.retiroDato}>
+                      <Text style={s.retiroDatoLabel}>Banco: </Text>{r.banco}
+                    </Text>
+                    {r.clabe && (
+                      <Text style={s.retiroDato}>
+                        <Text style={s.retiroDatoLabel}>CLABE: </Text>****{r.clabe.slice(-4)}
+                      </Text>
+                    )}
+                    {r.numero_tarjeta && (
+                      <Text style={s.retiroDato}>
+                        <Text style={s.retiroDatoLabel}>Tarjeta: </Text>****{r.numero_tarjeta.slice(-4)}
+                      </Text>
+                    )}
                   </View>
-                  {r.nota_admin && (
-                    <Text style={s.retiroNota}>💬 {r.nota_admin}</Text>
-                  )}
-                  <Text style={s.retiroFecha}>{formatFecha(r.creado_en)}</Text>
+
+                  {/* Nota del admin (si hay) */}
+                  {r.nota_admin ? (
+                    <View style={s.notaAdminWrap}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={12} color={C.orange} />
+                      <Text style={s.retiroNota}>{r.nota_admin}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Fechas */}
+                  <View style={s.retiroFechas}>
+                    <Text style={s.retiroFecha}>Solicitado: {formatFecha(r.creado_en)}</Text>
+                    {r.resuelto_en && (
+                      <Text style={[s.retiroFecha, { color: estadoColor }]}>
+                        Resuelto: {formatFecha(r.resuelto_en)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               );
             })}
@@ -476,59 +552,62 @@ export default function BilleteraScreen() {
 }
 
 const s = StyleSheet.create({
-  root:               { flex:1, backgroundColor:C.bg },
-  center:             { flex:1, justifyContent:'center', alignItems:'center', backgroundColor:C.bg },
-  scroll:             { flex:1 },
-  header:             { paddingBottom:16, paddingHorizontal:20 },
-  headerTitle:        { color:C.text, fontSize:28, fontWeight:'bold' },
+  root:               { flex: 1, backgroundColor: C.bg },
+  center:             { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg },
+  scroll:             { flex: 1 },
+  header:             { paddingBottom: 16, paddingHorizontal: 20 },
+  headerTitle:        { color: C.text, fontSize: 28, fontWeight: 'bold' },
 
   // Tarjeta saldo
-  saldoCard:          { marginHorizontal:16, marginBottom:16, backgroundColor:C.card, borderRadius:20, padding:20, borderWidth:1.5, borderColor:'rgba(0,180,216,0.25)' },
-  saldoLabel:         { color:C.textSub, fontSize:13, fontWeight:'600', marginBottom:4 },
-  saldoTotal:         { color:C.text, fontSize:44, fontWeight:'900', marginBottom:16 },
-  saldoDesglose:      { flexDirection:'row', alignItems:'center', marginBottom:20, backgroundColor:C.bg, borderRadius:12, padding:14, gap:12 },
-  saldoItem:          { flex:1, flexDirection:'row', alignItems:'center', gap:10 },
-  saldoDot:           { width:10, height:10, borderRadius:5 },
-  saldoItemLabel:     { color:C.textSub, fontSize:11, fontWeight:'600' },
-  saldoItemMonto:     { fontWeight:'800', fontSize:18 },
-  saldoDivider:       { width:1, height:36, backgroundColor:C.cardBorder },
-  btnRetirar:         { flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8, backgroundColor:C.accent, borderRadius:12, padding:14 },
-  btnRetirarDisabled: { backgroundColor:'#1e2a30', opacity:0.5 },
-  btnRetirarTexto:    { color:'#fff', fontWeight:'800', fontSize:15 },
+  saldoCard:          { marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, padding: 20, borderWidth: 1.5, borderColor: 'rgba(0,180,216,0.25)' },
+  saldoLabel:         { color: C.textSub, fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  saldoTotal:         { color: C.text, fontSize: 44, fontWeight: '900', marginBottom: 16 },
+  saldoDesglose:      { flexDirection: 'row', alignItems: 'center', marginBottom: 20, backgroundColor: C.bg, borderRadius: 12, padding: 14, gap: 12 },
+  saldoItem:          { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  saldoDot:           { width: 10, height: 10, borderRadius: 5 },
+  saldoItemLabel:     { color: C.textSub, fontSize: 11, fontWeight: '600' },
+  saldoItemMonto:     { fontWeight: '800', fontSize: 18 },
+  saldoDivider:       { width: 1, height: 36, backgroundColor: C.cardBorder },
+  btnRetirar:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 12, padding: 14 },
+  btnRetirarDisabled: { backgroundColor: '#1e2a30', opacity: 0.5 },
+  btnRetirarTexto:    { color: '#fff', fontWeight: '800', fontSize: 15 },
 
   // Tabs
-  tabsRow:            { flexDirection:'row', marginHorizontal:16, marginBottom:12, gap:8 },
-  tabBtn:             { flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6, padding:10, borderRadius:12, borderWidth:1.5, borderColor:C.cardBorder, backgroundColor:C.card },
-  tabActivo:          { borderColor:C.accent, backgroundColor:C.accentDim },
-  tabTexto:           { color:C.textSub, fontWeight:'700', fontSize:13 },
-  tabTextoActivo:     { color:C.accent },
-  badge:              { backgroundColor:C.orange, borderRadius:8, minWidth:16, height:16, alignItems:'center', justifyContent:'center', paddingHorizontal:4 },
-  badgeTexto:         { color:'#fff', fontSize:9, fontWeight:'900' },
+  tabsRow:            { flexDirection: 'row', marginHorizontal: 16, marginBottom: 12, gap: 8 },
+  tabBtn:             { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 10, borderRadius: 12, borderWidth: 1.5, borderColor: C.cardBorder, backgroundColor: C.card },
+  tabActivo:          { borderColor: C.accent, backgroundColor: C.accentDim },
+  tabTexto:           { color: C.textSub, fontWeight: '700', fontSize: 13 },
+  tabTextoActivo:     { color: C.accent },
+  badge:              { backgroundColor: C.orange, borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  badgeTexto:         { color: '#fff', fontSize: 9, fontWeight: '900' },
 
   // Lista
-  lista:              { marginHorizontal:16 },
-  empty:              { alignItems:'center', padding:48 },
-  emptyEmoji:         { fontSize:40, marginBottom:12 },
-  emptyTexto:         { color:C.textSub, fontSize:14 },
+  lista:              { marginHorizontal: 16 },
+  empty:              { alignItems: 'center', padding: 48 },
+  emptyEmoji:         { fontSize: 40, marginBottom: 12 },
+  emptyTexto:         { color: C.textSub, fontSize: 14, fontWeight: '700' },
+  emptyHint:          { color: C.textSub, fontSize: 12, marginTop: 4, textAlign: 'center' },
 
   // Movimiento row
-  movRow:             { flexDirection:'row', alignItems:'center', gap:12, paddingVertical:12, borderBottomWidth:1, borderBottomColor:C.cardBorder },
-  movIconWrap:        { width:42, height:42, borderRadius:12, alignItems:'center', justifyContent:'center' },
-  movInfo:            { flex:1 },
-  movTipo:            { color:C.text, fontWeight:'700', fontSize:14 },
-  movDesc:            { color:C.textSub, fontSize:12, marginTop:1 },
-  movFecha:           { color:C.textSub, fontSize:11, marginTop:2 },
-  movMonto:           { fontWeight:'900', fontSize:16 },
+  movRow:             { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  movIconWrap:        { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  movInfo:            { flex: 1 },
+  movTipo:            { color: C.text, fontWeight: '700', fontSize: 14 },
+  movDesc:            { color: C.textSub, fontSize: 12, marginTop: 1 },
+  movFecha:           { color: C.textSub, fontSize: 11, marginTop: 2 },
+  movMonto:           { fontWeight: '900', fontSize: 16 },
 
   // Retiro card
-  retiroCard:         { backgroundColor:C.card, borderRadius:14, padding:14, marginBottom:10, borderWidth:1, borderColor:C.cardBorder },
-  retiroHeaderRow:    { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:10 },
-  retiroMonto:        { color:C.text, fontSize:22, fontWeight:'900' },
-  estadoPill:         { borderWidth:1.5, borderRadius:20, paddingHorizontal:10, paddingVertical:4 },
-  estadoTexto:        { fontWeight:'800', fontSize:11 },
-  retiroDatos:        { gap:4, marginBottom:8 },
-  retiroDato:         { color:C.textSub, fontSize:12 },
-  retiroDatoLabel:    { color:C.text, fontWeight:'700' },
-  retiroNota:         { color:C.orange, fontSize:12, marginBottom:6, fontStyle:'italic' },
-  retiroFecha:        { color:C.textSub, fontSize:11 },
+  retiroCard:         { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.cardBorder },
+  retiroHeaderRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  retiroMonto:        { color: C.text, fontSize: 22, fontWeight: '900' },
+  estadoPill:         { borderWidth: 1.5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  estadoTexto:        { fontWeight: '800', fontSize: 11 },
+  retiroDatos:        { gap: 4, marginBottom: 8 },
+  retiroDato:         { color: C.textSub, fontSize: 12 },
+  retiroDatoLabel:    { color: C.text, fontWeight: '700' },
+  notaAdminWrap:      { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: 'rgba(255,159,67,0.07)', borderRadius: 8, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,159,67,0.2)' },
+  retiroNota:         { color: C.orange, fontSize: 12, flex: 1, fontStyle: 'italic' },
+  retiroFechas:       { gap: 2 },
+  retiroFecha:        { color: C.textSub, fontSize: 11 },
 });
