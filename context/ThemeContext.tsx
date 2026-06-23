@@ -5,58 +5,94 @@ export type Theme = 'dark' | 'light';
 
 const STORAGE_KEY = 'quinielaspro_theme';
 
+// ─── Paleta STATZ-style: negro profundo + cards con glow de color ──────────────
 const dark = {
-  bg: '#0a0a15',
-  bg2: '#0d0d1a',
-  card: '#131320',
-  card2: '#161625',
-  cardBorder: '#1c1c30',
-  cardBorder2: '#1e1e35',
-  accent: '#00b4d8',
-  accentDim: 'rgba(0,180,216,0.12)',
-  text: '#f0f0ff',
-  textSub: '#8888aa',
-  textMuted: '#44445a',
-  green: '#00c897',
-  greenDim: 'rgba(0,200,151,0.12)',
-  orange: '#ff9f43',
-  orangeDim: 'rgba(255,159,67,0.12)',
-  red: '#ff6b6b',
-  redDim: 'rgba(255,107,107,0.1)',
-  gold: '#ffd700',
-  goldDim: 'rgba(255,215,0,0.1)',
-  purple: '#a78bfa',
-  purpleDim: 'rgba(167,139,250,0.1)',
-  tabBar: '#0d0d1a',
-  tabBarBorder: '#1e1e30',
-  statusBar: 'light' as const,
+  bg:           '#0b0b10',
+  bg2:          '#0e0e14',
+  card:         '#13131a',
+  card2:        '#16161f',
+  cardBorder:   '#1f1f2e',
+  cardBorder2:  '#22223a',
+
+  // Acento principal — cyan/teal brillante
+  accent:       '#00d4ff',
+  accentDim:    'rgba(0,212,255,0.10)',
+  accentGlow:   'rgba(0,212,255,0.25)',
+
+  text:         '#f4f4ff',
+  textSub:      '#7070a0',
+  textMuted:    '#3a3a5a',
+
+  // Verde neón — partidos confirmados, pago confirmado
+  green:        '#00e5a0',
+  greenDim:     'rgba(0,229,160,0.10)',
+  greenGlow:    'rgba(0,229,160,0.28)',
+
+  // Naranja ámbar — advertencias, urgente
+  orange:       '#ffb340',
+  orangeDim:    'rgba(255,179,64,0.10)',
+  orangeGlow:   'rgba(255,179,64,0.28)',
+
+  // Rojo coral — errores, crítico
+  red:          '#ff5a6e',
+  redDim:       'rgba(255,90,110,0.10)',
+  redGlow:      'rgba(255,90,110,0.28)',
+
+  // Dorado — premios, precio
+  gold:         '#ffd060',
+  goldDim:      'rgba(255,208,96,0.10)',
+  goldGlow:     'rgba(255,208,96,0.28)',
+
+  // Morado — bet builder, especial
+  purple:       '#b57bff',
+  purpleDim:    'rgba(181,123,255,0.10)',
+  purpleGlow:   'rgba(181,123,255,0.28)',
+
+  // Rosa magenta — next match hero card
+  pink:         '#ff4fa0',
+  pinkDim:      'rgba(255,79,160,0.10)',
+  pinkGlow:     'rgba(255,79,160,0.28)',
+
+  tabBar:       '#0e0e14',
+  tabBarBorder: '#1a1a28',
+  statusBar:    'light' as const,
 };
 
+// Modo claro — mantiene misma estructura pero superficies claras
 const light = {
-  bg: '#f0f2f8',
-  bg2: '#f5f7fc',
-  card: '#ffffff',
-  card2: '#ffffff',
-  cardBorder: '#dde1ef',
-  cardBorder2: '#e0e4f0',
-  accent: '#0096b4',
-  accentDim: 'rgba(0,150,180,0.1)',
-  text: '#0e0e20',
-  textSub: '#555577',
-  textMuted: '#9999bb',
-  green: '#009e78',
-  greenDim: 'rgba(0,158,120,0.1)',
-  orange: '#e08a00',
-  orangeDim: 'rgba(224,138,0,0.1)',
-  red: '#d94f4f',
-  redDim: 'rgba(217,79,79,0.08)',
-  gold: '#c8a200',
-  goldDim: 'rgba(200,162,0,0.1)',
-  purple: '#7c5cbf',
-  purpleDim: 'rgba(124,92,191,0.1)',
-  tabBar: '#ffffff',
+  bg:           '#f0f2f8',
+  bg2:          '#f5f7fc',
+  card:         '#ffffff',
+  card2:        '#f8f9ff',
+  cardBorder:   '#dde1ef',
+  cardBorder2:  '#e0e4f0',
+  accent:       '#009fc0',
+  accentDim:    'rgba(0,159,192,0.10)',
+  accentGlow:   'rgba(0,159,192,0.20)',
+  text:         '#0e0e20',
+  textSub:      '#555577',
+  textMuted:    '#9999bb',
+  green:        '#00a878',
+  greenDim:     'rgba(0,168,120,0.10)',
+  greenGlow:    'rgba(0,168,120,0.20)',
+  orange:       '#e08a00',
+  orangeDim:    'rgba(224,138,0,0.10)',
+  orangeGlow:   'rgba(224,138,0,0.20)',
+  red:          '#d94f4f',
+  redDim:       'rgba(217,79,79,0.08)',
+  redGlow:      'rgba(217,79,79,0.18)',
+  gold:         '#c8a200',
+  goldDim:      'rgba(200,162,0,0.10)',
+  goldGlow:     'rgba(200,162,0,0.20)',
+  purple:       '#7c5cbf',
+  purpleDim:    'rgba(124,92,191,0.10)',
+  purpleGlow:   'rgba(124,92,191,0.20)',
+  pink:         '#d43880',
+  pinkDim:      'rgba(212,56,128,0.10)',
+  pinkGlow:     'rgba(212,56,128,0.20)',
+  tabBar:       '#ffffff',
   tabBarBorder: '#dde1ef',
-  statusBar: 'dark' as const,
+  statusBar:    'dark' as const,
 };
 
 export type ThemeColors = typeof dark;
@@ -90,11 +126,8 @@ const setStored = (t: Theme) => {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(getStored);
-
   useEffect(() => { setStored(theme); }, [theme]);
-
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
-
   return (
     <ThemeContext.Provider value={{ theme, colors: theme === 'dark' ? dark : light, toggleTheme }}>
       {children}
