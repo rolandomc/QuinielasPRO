@@ -38,7 +38,6 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
     .eq('estado_pago', 'pagado');
   if (qErr || !quinielas || quinielas.length === 0) return null;
 
-  // CORREGIDO: resultado_final (no resultado_real)
   const { data: partidos, error: pErr } = await supabase
     .from('partidos')
     .select('id, resultado_final, goles_local_real, goles_visitante_real')
@@ -55,10 +54,14 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
   const usuarioIds = [...new Set(quinielas.map(q => q.usuario_id))];
   const { data: perfiles } = await supabase
     .from('usuarios')
-    .select('id, nombre')
+    .select('id, nombre, saldo')
     .in('id', usuarioIds);
   const nombrePorId: Record<string, string> = {};
-  (perfiles || []).forEach(p => { nombrePorId[p.id] = p.nombre || p.id; });
+  const saldoPorId: Record<string, number> = {};
+  (perfiles || []).forEach(p => {
+    nombrePorId[p.id] = p.nombre || p.id;
+    saldoPorId[p.id] = p.saldo ?? 0;
+  });
 
   const golesReales = partidos.reduce((acc, p) => {
     return acc + (p.goles_local_real ?? 0) + (p.goles_visitante_real ?? 0);
@@ -67,7 +70,6 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
   const posiciones: Omit<PosicionQuiniela, 'posicion' | 'premio_ganado'>[] = quinielas.map(q => {
     const predsUsuario = (predicciones || []).filter(pr => pr.usuario_id === q.usuario_id);
 
-    // CORREGIDO: comparar con resultado_final
     const aciertos = predsUsuario.reduce((acc, pr) => {
       const partido = partidos.find(p => p.id === pr.partido_id);
       if (!partido?.resultado_final) return acc;
@@ -115,6 +117,7 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
 
   ganadores.forEach(g => { g.premio_ganado = premioPorGanador; });
 
+  // Guardar posiciones y premios en quinielas
   for (const pos of posicionadas) {
     await supabase
       .from('quinielas')
@@ -126,6 +129,15 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
         premio_ganado: pos.premio_ganado,
       })
       .eq('id', pos.quiniela_id);
+  }
+
+  // Acreditar el premio al saldo de cada ganador
+  for (const ganador of ganadores) {
+    const saldoActual = saldoPorId[ganador.usuario_id] ?? 0;
+    await supabase
+      .from('usuarios')
+      .update({ saldo: saldoActual + premioPorGanador })
+      .eq('id', ganador.usuario_id);
   }
 
   await supabase
