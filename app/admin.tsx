@@ -25,7 +25,7 @@ const C = {
 };
 
 type Partido  = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean; resultado_final:string|null; api_fixture_id:number|null; goles_local_real:number|null; goles_visitante_real:number|null };
-type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string; precio?:number|null; porcentaje_organizador?:number|null };
+type Jornada  = { id:string; nombre:string; estado:string; api_competition_id:string|null; api_season:string|null; api_matchday:string|null; creado_at:string; precio?:number|null; porcentaje_organizador?:number|null; ganador_usuario_id?:string|null };
 type Quiniela = { id:string; estado_pago:string; codigo:string|null; jornada_id:string; usuario_id:string; monto_cobrado:number|null; usuarios:{nombre:string;username:string}|null };
 type Fixture  = { fixture:{id:number;date:string;status:{short:string}}; teams:{home:{name:string};away:{name:string}}; goals?:{home:number|null;away:number|null} };
 type Screen   = 'home'|'crear_quiniela'|'jornada_detalle'|'quinielas'|'ingresos';
@@ -321,6 +321,8 @@ export default function AdminScreen(){
     try{
       const resumen=await calcularGanador(j.id);
       setResumenGanador(resumen);
+      // Refrescar jornadas para que ganador_usuario_id quede actualizado en estado
+      await cargarDatos();
     }catch(e:any){
       avisar('Error',e.message);
       setModalGanador(false);
@@ -529,6 +531,7 @@ export default function AdminScreen(){
     const qJTodos=quinielas.filter(q=>q.jornada_id===j.id);
     const pagadosJ=qJTodos.filter(q=>q.estado_pago==='pagado');
     const pendientesJ=qJTodos.filter(q=>q.estado_pago!=='pagado');
+    const ganadorYaDeterminado=!!j.ganador_usuario_id;
 
     return(
       <View style={{flex:1}}>
@@ -579,8 +582,31 @@ export default function AdminScreen(){
             </TouchableOpacity>
           )}
           {isFinalizada&&(
-            <TouchableOpacity style={[styles.detalleBtn,{backgroundColor:C.goldDim,borderColor:C.gold},calculando&&{opacity:0.5}]} onPress={()=>handleCalcularGanador(j)} disabled={calculando}>
-              {calculando?<ActivityIndicator color={C.gold} size="small"/>:<><Ionicons name="trophy" size={15} color={C.gold}/><Text style={[styles.detalleBtnTexto,{color:C.gold}]}>Ganador</Text></>}
+            <TouchableOpacity
+              style={[
+                styles.detalleBtn,
+                {backgroundColor:C.goldDim,borderColor:C.gold},
+                (calculando||ganadorYaDeterminado)&&{opacity:0.4},
+              ]}
+              onPress={()=>{
+                if(ganadorYaDeterminado){
+                  avisar('Ya calculado','El ganador ya fue determinado para esta quiniela.');
+                  return;
+                }
+                handleCalcularGanador(j);
+              }}
+              disabled={calculando}
+              activeOpacity={0.85}
+            >
+              {calculando
+                ?<ActivityIndicator color={C.gold} size="small"/>
+                :<>
+                    <Ionicons name="trophy" size={15} color={C.gold}/>
+                    <Text style={[styles.detalleBtnTexto,{color:C.gold}]}>
+                      {ganadorYaDeterminado?'Ganador ✓':'Ganador'}
+                    </Text>
+                  </>
+              }
             </TouchableOpacity>
           )}
           <TouchableOpacity style={[styles.detalleBtn,{backgroundColor:'rgba(255,215,0,0.08)',borderColor:C.gold+'60'}]} onPress={()=>{
@@ -853,348 +879,4 @@ export default function AdminScreen(){
       <Text style={[styles.seccionTitulo,{marginTop:16}]}>Por jornada</Text>
       {datosIngresos.map(({j,qJ,pagadasJ,pendientesJ,recaudadoJ,potencial})=>(
         <View key={j.id} style={styles.ingresoCard}>
-          <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
-            <Text style={styles.ingresoNombre} numberOfLines={2}>{j.nombre}</Text>
-            <Text style={[styles.ingresoMonto,{color:C.gold}]}>${recaudadoJ.toFixed(0)}</Text>
-          </View>
-          <View style={{flexDirection:'row',gap:16,marginBottom:2}}>
-            <Text style={styles.ingresoSub}><Text style={{color:C.green}}>{pagadasJ.length}</Text> pagadas</Text>
-            <Text style={styles.ingresoSub}><Text style={{color:C.orange}}>{pendientesJ.length}</Text> pendientes</Text>
-            {potencial>0&&<Text style={styles.ingresoSub}><Text style={{color:C.textSub}}>+${potencial.toFixed(0)}</Text> potencial</Text>}
-          </View>
-          <PulseBar valor={recaudadoJ} max={maxRecaudado} color={C.gold}/>
-        </View>
-      ))}
-    </ScrollView>
-  );
-
-  // ─── MODALES ──────────────────────────────────────────────────────────────
-
-  const renderModalResultado=()=>(
-    <Modal visible={modalResultado} transparent animationType="slide" onRequestClose={()=>setModalResultado(false)}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitulo}>Capturar resultado</Text>
-            <TouchableOpacity onPress={()=>setModalResultado(false)}><Ionicons name="close" size={22} color={C.textSub}/></TouchableOpacity>
-          </View>
-          {partidoSel&&(
-            <>
-              <Text style={styles.modalPartidoNombre}>{partidoSel.local} vs {partidoSel.visitante}</Text>
-              <Text style={styles.modalLabel}>Marcador real (opcional)</Text>
-              <View style={{flexDirection:'row',gap:12,marginBottom:12}}>
-                <View style={{flex:1}}>
-                  <Text style={[styles.modalLabel,{fontSize:11,marginBottom:4}]}>{partidoSel.local}</Text>
-                  <TextInput style={styles.input} value={golesLocalInput} onChangeText={setGolesLocalInput} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.textMuted}/>
-                </View>
-                <View style={{flex:1}}>
-                  <Text style={[styles.modalLabel,{fontSize:11,marginBottom:4}]}>{partidoSel.visitante}</Text>
-                  <TextInput style={styles.input} value={golesVisitanteInput} onChangeText={setGolesVisitanteInput} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.textMuted}/>
-                </View>
-              </View>
-              <Text style={styles.modalLabel}>Resultado</Text>
-              <View style={styles.resultadoBtnsRow}>
-                {(['1','X','2'] as const).map(r=>(
-                  <TouchableOpacity key={r} style={[styles.resultadoBtn,resultadoInput===r&&styles.resultadoBtnActivo]} onPress={()=>setResultadoInput(r)} activeOpacity={0.8}>
-                    <Text style={[styles.resultadoBtnTexto,resultadoInput===r&&{color:'#fff'}]}>{r}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity style={[styles.btnGuardar,(!resultadoInput||saving)&&{opacity:0.5}]} onPress={guardarResultado} disabled={!resultadoInput||saving} activeOpacity={0.85}>
-                {saving?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar resultado</Text>}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderModalPrecio=()=>(
-    <Modal visible={modalPrecio} transparent animationType="slide" onRequestClose={()=>setModalPrecio(false)}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitulo}>Precio y organizador</Text>
-            <TouchableOpacity onPress={()=>setModalPrecio(false)}><Ionicons name="close" size={22} color={C.textSub}/></TouchableOpacity>
-          </View>
-          <Text style={styles.modalLabel}>Precio por quiniela (MXN)</Text>
-          <TextInput style={styles.input} value={precioInput} onChangeText={setPrecioInput} keyboardType="decimal-pad" placeholder="Ej: 50" placeholderTextColor={C.textMuted} autoFocus/>
-          <Text style={[styles.modalLabel,{marginTop:12}]}>% para el organizador (0-100)</Text>
-          <TextInput style={styles.input} value={porcOrgInput} onChangeText={setPorcOrgInput} keyboardType="number-pad" placeholder="Ej: 20" placeholderTextColor={C.textMuted}/>
-          <Text style={{color:C.textMuted,fontSize:11,marginBottom:12,marginTop:4}}>El resto va al ganador como premio.</Text>
-          <TouchableOpacity style={[styles.btnGuardar,savingPrecio&&{opacity:0.5}]} onPress={guardarPrecio} disabled={savingPrecio} activeOpacity={0.85}>
-            {savingPrecio?<ActivityIndicator color="#fff" size="small"/>:<Text style={styles.btnGuardarTexto}>Guardar</Text>}
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderModalGanador=()=>(
-    <Modal visible={modalGanador} transparent animationType="slide" onRequestClose={()=>setModalGanador(false)}>
-      <View style={styles.modalOverlay}>
-        <View style={[styles.modalCard,{maxHeight:'90%'}]}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitulo}>Tabla de posiciones</Text>
-            <TouchableOpacity onPress={()=>setModalGanador(false)}><Ionicons name="close" size={22} color={C.textSub}/></TouchableOpacity>
-          </View>
-          {calculando&&<ActivityIndicator color={C.gold} size="large" style={{marginVertical:24}}/>}
-          {!calculando&&resumenGanador&&(
-            <ScrollView>
-              <View style={[styles.ganadorBanner,{backgroundColor:C.goldDim,borderColor:C.gold}]}>
-                {resumenGanador.empate_perfecto
-                  ?<Text style={styles.ganadorTitulo}>Empate — premio compartido</Text>
-                  :<Text style={styles.ganadorTitulo}>{resumenGanador.ganador_nombre}</Text>
-                }
-                <Text style={styles.ganadorPremio}>Premio: ${resumenGanador.premio_por_ganador.toFixed(2)}{resumenGanador.empate_perfecto?' c/u':''}</Text>
-                <View style={{flexDirection:'row',gap:16,marginTop:4}}>
-                  <Text style={styles.ganadorSub}>Bolsa: ${resumenGanador.bolsa_total.toFixed(2)}</Text>
-                  <Text style={styles.ganadorSub}>Org. {resumenGanador.porcentaje_organizador}%: ${(resumenGanador.bolsa_total-resumenGanador.bolsa_premio).toFixed(2)}</Text>
-                </View>
-              </View>
-              {resumenGanador.posiciones.map((pos,idx)=>{
-                const isGanador=pos.premio_ganado>0;
-                const medalLabel = idx===0 ? '1er' : idx===1 ? '2do' : idx===2 ? '3er' : String(pos.posicion);
-                return(
-                  <View key={pos.quiniela_id} style={[styles.posRow,isGanador&&{backgroundColor:C.goldDim,borderColor:C.gold+'60'}]}>
-                    <Text style={styles.posNum}>{medalLabel}</Text>
-                    <View style={{flex:1,marginLeft:10}}>
-                      <Text style={[styles.posNombre,isGanador&&{color:C.gold}]}>{pos.nombre}</Text>
-                      <Text style={styles.posSub}>{pos.aciertos} aciertos{pos.diferencia_goles!=null?` · Δgoles: ${pos.diferencia_goles}`:''}</Text>
-                    </View>
-                    {pos.premio_ganado>0&&(
-                      <View style={styles.posPremio}>
-                        <Text style={styles.posPremioTexto}>${pos.premio_ganado.toFixed(2)}</Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-            </ScrollView>
-          )}
-          {!calculando&&!resumenGanador&&(
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTexto}>No hay datos suficientes para calcular el ganador.</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
-
-  // ─── RENDER PRINCIPAL ─────────────────────────────────────────────────────
-
-  return(
-    <View style={[styles.root,{paddingTop:insets.top}]}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg}/>
-
-      {mostrarNav&&(
-        <View style={styles.header}>
-          {screen!=='home'
-            ?<TouchableOpacity style={styles.headerBack} onPress={()=>setScreen('home')}>
-               <Ionicons name="arrow-back" size={20} color={C.text}/>
-             </TouchableOpacity>
-            :<View style={{width:36}}/>
-          }
-          <Text style={styles.headerTitulo}>
-            {screen==='home'?'Admin':screen==='jornada_detalle'?(jornadaSel?.nombre||'Detalle'):screen==='quinielas'?'Quinielas':'Ingresos'}
-          </Text>
-          {/* Badge retiros en header */}
-          {screen==='home'&&retirosPendientes>0
-            ?<TouchableOpacity style={styles.headerRetiroBtn} onPress={()=>router.push('/admin-retiros')}>
-               <Ionicons name="wallet-outline" size={20} color={C.orange}/>
-               <View style={styles.headerRetiroBadge}><Text style={styles.headerRetiroBadgeTexto}>{retirosPendientes}</Text></View>
-             </TouchableOpacity>
-            :<View style={{width:36}}/>
-          }
-        </View>
-      )}
-
-      <View style={{flex:1}}>
-        {screen==='home'&&renderHome()}
-        {screen==='crear_quiniela'&&renderCrearQuiniela()}
-        {screen==='jornada_detalle'&&renderDetalleJornada()}
-        {screen==='quinielas'&&renderQuinielas()}
-        {screen==='ingresos'&&renderIngresos()}
-      </View>
-
-      {mostrarNav&&(
-        <View style={[styles.bottomNav,{paddingBottom:insets.bottom+4}]}>
-          <TouchableOpacity style={styles.navTab} onPress={()=>setScreen('home')} activeOpacity={0.7}>
-            <Ionicons name="football" size={22} color={screen==='home'?C.accent:C.textMuted}/>
-            <Text style={[styles.navTabLabel,screen==='home'&&{color:C.accent}]}>Quinielas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.navTab,styles.navTabCenter]} onPress={abrirCrear} activeOpacity={0.7}>
-            <View style={styles.navAddBtn}>
-              <Ionicons name="add" size={26} color="#fff"/>
-            </View>
-          </TouchableOpacity>
-          {/* TAB RETIROS con badge */}
-          <TouchableOpacity style={styles.navTab} onPress={()=>router.push('/admin-retiros')} activeOpacity={0.7}>
-            <View style={{position:'relative'}}>
-              <Ionicons name="wallet-outline" size={22} color={C.textMuted}/>
-              {retirosPendientes>0&&(
-                <View style={styles.navBadge}>
-                  <Text style={styles.navBadgeTexto}>{retirosPendientes}</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.navTabLabel}>Retiros</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {renderModalResultado()}
-      {renderModalPrecio()}
-      {renderModalGanador()}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg},
-  center:{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:C.bg},
-  header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
-  headerBack:{width:36,height:36,justifyContent:'center',alignItems:'center'},
-  headerTitulo:{fontSize:17,fontWeight:'700',color:C.text,flex:1,textAlign:'center'},
-  headerRetiroBtn:{width:36,height:36,justifyContent:'center',alignItems:'center'},
-  headerRetiroBadge:{position:'absolute',top:-4,right:-4,backgroundColor:C.orange,borderRadius:8,minWidth:16,height:16,alignItems:'center',justifyContent:'center',paddingHorizontal:3},
-  headerRetiroBadgeTexto:{color:'#fff',fontSize:9,fontWeight:'900'},
-  bottomNav:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.cardBorder},
-  navTab:{flex:1,alignItems:'center',paddingTop:10,paddingBottom:4,gap:2},
-  navTabCenter:{justifyContent:'center',paddingTop:0,paddingBottom:0},
-  navAddBtn:{width:52,height:52,backgroundColor:C.accent,borderRadius:26,justifyContent:'center',alignItems:'center',marginBottom:8,shadowColor:C.accent,shadowOffset:{width:0,height:4},shadowOpacity:0.5,shadowRadius:8,elevation:8},
-  navTabLabel:{fontSize:10,color:C.textMuted,fontWeight:'500'},
-  navBadge:{position:'absolute',top:-4,right:-6,backgroundColor:C.orange,borderRadius:8,minWidth:16,height:16,alignItems:'center',justifyContent:'center',paddingHorizontal:3},
-  navBadgeTexto:{color:'#fff',fontSize:9,fontWeight:'900'},
-  // Banner retiros en home
-  retirosBannerBtn:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',backgroundColor:C.card,borderRadius:14,borderWidth:1,borderColor:C.accent+'40',padding:14,marginBottom:20},
-  retirosBannerLeft:{flexDirection:'row',alignItems:'center',gap:12},
-  retirosBannerTitulo:{color:C.text,fontSize:14,fontWeight:'700'},
-  retirosBannerSub:{color:C.textSub,fontSize:11,marginTop:2},
-  retirosBannerRight:{flexDirection:'row',alignItems:'center',gap:8},
-  retirosBadge:{backgroundColor:C.orange,borderRadius:12,minWidth:22,height:22,alignItems:'center',justifyContent:'center',paddingHorizontal:6},
-  retirosBadgeTexto:{color:'#fff',fontSize:11,fontWeight:'900'},
-  statsRow:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:20},
-  statChip:{flex:1,minWidth:'44%',borderRadius:12,borderWidth:1,padding:12,alignItems:'center',gap:4},
-  statChipVal:{fontSize:20,fontWeight:'800'},
-  statChipLabel:{fontSize:11,color:C.textSub,fontWeight:'500'},
-  seccionTitulo:{fontSize:13,fontWeight:'700',color:C.textSub,letterSpacing:1,textTransform:'uppercase',marginBottom:10},
-  jornadaCard:{backgroundColor:C.card,borderRadius:14,borderWidth:1,borderColor:C.cardBorder,padding:14,marginBottom:10},
-  jornadaNombre:{fontSize:15,fontWeight:'700',color:C.text,marginBottom:6},
-  jornadaMeta:{flexDirection:'row',alignItems:'center',gap:6},
-  jornadaMetaTexto:{fontSize:12,color:C.textSub},
-  jornadaMetaSep:{fontSize:12,color:C.textMuted},
-  jornadaPrecioTag:{fontSize:11,color:C.gold,fontWeight:'600',marginLeft:8},
-  estadoPillSmall:{flexDirection:'row',alignItems:'center',gap:4,paddingHorizontal:8,paddingVertical:3,borderRadius:20,borderWidth:1},
-  estadoDotSmall:{width:5,height:5,borderRadius:3},
-  estadoPillSmallTexto:{fontSize:10,fontWeight:'700'},
-  ingresoCard:{backgroundColor:C.card,borderRadius:14,borderWidth:1,borderColor:C.cardBorder,padding:14,marginBottom:10},
-  ingresoNombre:{fontSize:14,fontWeight:'700',color:C.text,flex:1,marginRight:8},
-  ingresoMonto:{fontSize:18,fontWeight:'800'},
-  ingresoSub:{fontSize:12,color:C.textSub},
-  quinielaCard:{backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:12,flexDirection:'row',alignItems:'center',gap:10,marginBottom:6},
-  quinielaNombre:{fontSize:14,fontWeight:'700',color:C.text},
-  quinielaUser:{fontSize:12,color:C.textSub,marginTop:1},
-  quinielaCodigo:{fontSize:11,color:C.textMuted,marginTop:2},
-  btnPagar:{backgroundColor:C.orangeDim,borderWidth:1,borderColor:C.orange,paddingHorizontal:12,paddingVertical:7,borderRadius:10},
-  btnPagarTexto:{fontSize:12,fontWeight:'700',color:C.orange},
-  jornadaHeaderRow:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:12,marginBottom:2},
-  jornadaHeaderNombre:{fontSize:14,fontWeight:'700',color:C.text},
-  jornadaHeaderSub:{fontSize:12,color:C.textSub,marginTop:2},
-  detalleBanner:{padding:16,borderBottomWidth:1,flexDirection:'row',alignItems:'flex-start',gap:12},
-  detalleNombre:{fontSize:18,fontWeight:'800',color:C.text,marginBottom:4},
-  detalleInfo:{fontSize:12,color:C.textSub},
-  estadoPill:{flexDirection:'row',alignItems:'center',gap:5,paddingHorizontal:10,paddingVertical:4,borderRadius:20,borderWidth:1},
-  estadoDot:{width:6,height:6,borderRadius:3},
-  estadoPillTexto:{fontSize:11,fontWeight:'700'},
-  detalleAcciones:{flexDirection:'row',flexWrap:'wrap',gap:8,padding:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
-  detalleBtn:{flexDirection:'row',alignItems:'center',gap:6,paddingHorizontal:12,paddingVertical:7,borderRadius:10,borderWidth:1},
-  detalleBtnTexto:{fontSize:12,fontWeight:'700'},
-  btnEnclavadoDot:{width:6,height:6,borderRadius:3,backgroundColor:C.purple,marginLeft:2},
-  bolsaInfoRow:{flexDirection:'row',padding:12,borderBottomWidth:1,borderBottomColor:C.cardBorder},
-  bolsaInfoItem:{flex:1,alignItems:'center'},
-  bolsaInfoSep:{width:1,backgroundColor:C.cardBorder,marginVertical:4},
-  bolsaInfoLabel:{fontSize:10,color:C.textSub,marginBottom:2},
-  bolsaInfoVal:{fontSize:16,fontWeight:'800'},
-  emptyCard:{alignItems:'center',justifyContent:'center',padding:40,gap:8},
-  emptyTexto:{fontSize:14,color:C.textMuted,textAlign:'center'},
-  partidoCard:{backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:12,marginBottom:8},
-  partidoCardConRes:{borderColor:C.green+'40',backgroundColor:'rgba(0,200,151,0.04)'},
-  partidoEquiposRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4},
-  partidoEquipo:{flex:1,fontSize:13,fontWeight:'600',color:C.text},
-  partidoCentro:{alignItems:'center',gap:4},
-  vsTexto:{fontSize:12,color:C.textMuted,fontWeight:'600'},
-  marcadorReal:{fontSize:15,fontWeight:'800',color:C.green},
-  resBadge:{paddingHorizontal:8,paddingVertical:2,borderRadius:8},
-  resBadgeTexto:{fontSize:12,fontWeight:'800'},
-  partidoFecha:{fontSize:11,color:C.textMuted},
-  usuarioRow:{flexDirection:'row',alignItems:'center',gap:10,borderRadius:12,borderWidth:1,padding:12,marginBottom:6},
-  usuarioEstadoDot:{width:8,height:8,borderRadius:4,flexShrink:0},
-  usuarioNombre:{fontSize:14,fontWeight:'700',color:C.text},
-  usuarioUser:{fontSize:12,color:C.textSub,marginTop:1},
-  btnTogglePago:{borderWidth:1,paddingHorizontal:10,paddingVertical:6,borderRadius:8},
-  btnTogglePagoTexto:{fontSize:12,fontWeight:'700'},
-  modalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.7)',justifyContent:'flex-end'},
-  modalCard:{backgroundColor:C.card,borderTopLeftRadius:20,borderTopRightRadius:20,padding:20,borderTopWidth:1,borderColor:C.cardBorder},
-  modalHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:16},
-  modalTitulo:{fontSize:17,fontWeight:'800',color:C.text},
-  modalLabel:{fontSize:12,color:C.textSub,fontWeight:'600',marginBottom:8},
-  modalPartidoNombre:{fontSize:14,fontWeight:'700',color:C.text,marginBottom:16,textAlign:'center'},
-  resultadoBtnsRow:{flexDirection:'row',gap:10,marginBottom:16},
-  resultadoBtn:{flex:1,paddingVertical:14,borderRadius:12,borderWidth:2,borderColor:C.cardBorder,alignItems:'center'},
-  resultadoBtnActivo:{backgroundColor:C.accent,borderColor:C.accent},
-  resultadoBtnTexto:{fontSize:18,fontWeight:'800',color:C.textSub},
-  btnGuardar:{backgroundColor:C.accent,borderRadius:12,paddingVertical:14,alignItems:'center'},
-  btnGuardarTexto:{fontSize:15,fontWeight:'800',color:'#fff'},
-  ganadorBanner:{borderRadius:14,borderWidth:1,padding:16,marginBottom:16,alignItems:'center'},
-  ganadorTitulo:{fontSize:18,fontWeight:'800',color:C.gold,textAlign:'center'},
-  ganadorPremio:{fontSize:22,fontWeight:'900',color:C.green,marginTop:4},
-  ganadorSub:{fontSize:12,color:C.textSub},
-  posRow:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:12,marginBottom:6},
-  posNum:{fontSize:14,fontWeight:'700',color:C.textSub,width:32,textAlign:'center'},
-  posNombre:{fontSize:14,fontWeight:'700',color:C.text},
-  posSub:{fontSize:12,color:C.textSub,marginTop:2},
-  posPremio:{backgroundColor:C.greenDim,borderRadius:8,borderWidth:1,borderColor:C.green,paddingHorizontal:10,paddingVertical:4},
-  posPremioTexto:{fontSize:13,fontWeight:'800',color:C.green},
-  wizardIndicator:{flexDirection:'row',alignItems:'center',justifyContent:'center',padding:16,borderBottomWidth:1,borderBottomColor:C.cardBorder},
-  wizardStepWrap:{alignItems:'center',gap:4},
-  wizardDot:{width:28,height:28,borderRadius:14,borderWidth:2,borderColor:C.cardBorder,justifyContent:'center',alignItems:'center'},
-  wizardDotNum:{fontSize:13,fontWeight:'700',color:C.textMuted},
-  wizardStepLabel:{fontSize:10,color:C.textMuted,fontWeight:'600'},
-  wizardLine:{flex:1,height:2,backgroundColor:C.cardBorder,marginHorizontal:8,marginBottom:16},
-  wizardTitulo:{fontSize:22,fontWeight:'800',color:C.text,marginBottom:8},
-  wizardSub:{fontSize:14,color:C.textSub,marginBottom:20,lineHeight:20},
-  wizardNavBar:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:16,borderTopWidth:1,borderTopColor:C.cardBorder,gap:12},
-  btnWizardBack:{flexDirection:'row',alignItems:'center',gap:6,flex:1,paddingVertical:14,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,justifyContent:'center'},
-  btnWizardBackTexto:{fontSize:14,fontWeight:'700',color:C.textSub},
-  btnWizardNext:{flexDirection:'row',alignItems:'center',gap:8,flex:2,paddingVertical:14,borderRadius:12,backgroundColor:C.accent,justifyContent:'center'},
-  btnWizardNextTexto:{fontSize:15,fontWeight:'800',color:'#fff'},
-  btnWizardFinal:{flexDirection:'row',alignItems:'center',gap:8,flex:2,paddingVertical:14,borderRadius:12,backgroundColor:C.green,justifyContent:'center'},
-  btnWizardFinalTexto:{fontSize:15,fontWeight:'800',color:'#fff'},
-  label:{fontSize:12,color:C.textSub,fontWeight:'600',marginBottom:6},
-  input:{backgroundColor:C.cardBorder,borderRadius:10,padding:12,color:C.text,fontSize:14,marginBottom:12},
-  inputGrande:{backgroundColor:C.cardBorder,borderRadius:12,padding:16,color:C.text,fontSize:18,fontWeight:'700',marginBottom:16},
-  ligaChip:{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:C.card,borderWidth:1,borderColor:C.cardBorder,alignItems:'center'},
-  ligaChipActiva:{borderColor:C.accent,backgroundColor:C.accentDim},
-  ligaChipTexto:{fontSize:12,fontWeight:'700',color:C.textSub},
-  ligaChipSub:{fontSize:10,color:C.textMuted},
-  modoBtn:{flex:1,paddingVertical:8,borderRadius:10,backgroundColor:C.card,borderWidth:1,borderColor:C.cardBorder,alignItems:'center'},
-  modoBtnActivo:{borderColor:C.accent,backgroundColor:C.accentDim},
-  modoBtnTexto:{fontSize:13,fontWeight:'700',color:C.textSub},
-  fixtureRow:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:10,borderWidth:1,borderColor:C.cardBorder,padding:10,marginBottom:6},
-  fixtureRowSel:{borderColor:C.accent,backgroundColor:C.accentDim},
-  checkbox:{width:20,height:20,borderRadius:5,borderWidth:2,borderColor:C.cardBorder,justifyContent:'center',alignItems:'center'},
-  checkboxSel:{backgroundColor:C.accent,borderColor:C.accent},
-  fixtureEquipos:{fontSize:13,fontWeight:'700',color:C.text},
-  fixtureFecha:{fontSize:11,color:C.textMuted,marginTop:2},
-  statusBadge:{paddingHorizontal:6,paddingVertical:2,borderRadius:6,borderWidth:1},
-  statusTexto:{fontSize:10,fontWeight:'700'},
-  btnSecundarioPrimary:{flexDirection:'row',alignItems:'center',gap:6,justifyContent:'center',padding:12,borderRadius:12,borderWidth:1,borderColor:C.accent,backgroundColor:C.accentDim,marginBottom:4},
-  btnSecundarioPrimaryTexto:{fontSize:14,fontWeight:'700',color:C.accent},
-  resumenCard:{backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.cardBorder,padding:14,marginBottom:16},
-  resumenRow:{flexDirection:'row',alignItems:'center',gap:10},
-  resumenLabel:{fontSize:12,color:C.textSub,flex:1},
-  resumenVal:{fontSize:13,fontWeight:'700',color:C.text,flex:2,textAlign:'right'},
-});
+          <View style=
