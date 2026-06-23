@@ -43,23 +43,29 @@ export default function AdminRetirosScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [retiros, setRetiros] = useState<SolicitudRetiro[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [retiros,    setRetiros]    = useState<SolicitudRetiro[]>([]);
+  const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filtro, setFiltro] = useState<EstadoRetiro>('pendiente');
+  const [filtro,     setFiltro]     = useState<EstadoRetiro>('pendiente');
+  const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
 
   // Modal resolver
   const [modalVisible, setModalVisible] = useState(false);
-  const [retiroSel, setRetiroSel] = useState<SolicitudRetiro | null>(null);
-  const [nota, setNota] = useState('');
-  const [resolviendo, setResolviendo] = useState(false);
+  const [retiroSel,    setRetiroSel]    = useState<SolicitudRetiro | null>(null);
+  const [nota,         setNota]         = useState('');
+  const [resolviendo,  setResolviendo]  = useState(false);
 
   const cargar = useCallback(async () => {
+    setErrorMsg(null);
     try {
       const data = await fetchRetiros();
+      console.log('[admin-retiros] registros cargados:', data.length);
       setRetiros(data);
     } catch (e: any) {
-      avisar('Error', e.message ?? 'No se pudieron cargar los retiros.');
+      const msg = e.message ?? 'No se pudieron cargar los retiros.';
+      console.error('[admin-retiros] Error al cargar:', msg);
+      setErrorMsg(msg);
+      avisar('Error al cargar retiros', msg);
     }
   }, []);
 
@@ -97,28 +103,25 @@ export default function AdminRetirosScreen() {
       avisar(
         aprobar ? '✅ Retiro aprobado' : '❌ Retiro rechazado',
         aprobar
-          ? `Se aprobó $${retiroSel.monto.toFixed(2)} para ${retiroSel.usuarios?.nombre}.`
+          ? `Se aprobó $${retiroSel.monto.toFixed(2)} para ${retiroSel.usuarios?.nombre ?? 'usuario'}.`
           : 'Se rechazó el retiro y el saldo fue devuelto al usuario.'
       );
     } catch (e: any) {
-      avisar('Error', e.message);
+      const msg = e.message ?? 'Error desconocido';
+      console.error('[admin-retiros] Error al resolver:', msg);
+      avisar('Error', msg);
     } finally {
       setResolviendo(false);
     }
   };
 
-  // ─── Métricas rápidas ───────────────────────────────────────────────────
-  const pendientesCount  = retiros.filter(r => r.estado === 'pendiente').length;
-  const aprobadosCount   = retiros.filter(r => r.estado === 'aprobado').length;
-  const totalPagado      = retiros
-    .filter(r => r.estado === 'aprobado')
-    .reduce((sum, r) => sum + r.monto, 0);
-  const retirosFiltered  = retiros.filter(r => r.estado === filtro);
+  const pendientesCount = retiros.filter(r => r.estado === 'pendiente').length;
+  const aprobadosCount  = retiros.filter(r => r.estado === 'aprobado').length;
+  const totalPagado     = retiros.filter(r => r.estado === 'aprobado').reduce((s, r) => s + r.monto, 0);
+  const retirosFiltered = retiros.filter(r => r.estado === filtro);
 
   if (loading) return (
-    <View style={s.center}>
-      <ActivityIndicator color={C.accent} size="large" />
-    </View>
+    <View style={s.center}><ActivityIndicator color={C.accent} size="large" /></View>
   );
 
   return (
@@ -141,10 +144,21 @@ export default function AdminRetirosScreen() {
         <View style={{ width: 36 }} />
       </View>
 
+      {/* BANNER DE ERROR (si la carga falló) */}
+      {errorMsg && (
+        <View style={s.errorBanner}>
+          <Ionicons name="warning-outline" size={16} color={C.red} />
+          <Text style={s.errorBannerTexto}>{errorMsg}</Text>
+          <TouchableOpacity onPress={cargar}>
+            <Text style={{ color: C.accent, fontSize: 12, fontWeight: '700' }}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* STATS */}
       <View style={s.statsRow}>
         <StatChip valor={pendientesCount} label="Pendientes" color={C.orange} bg={C.orangeDim} />
-        <StatChip valor={aprobadosCount} label="Aprobados" color={C.green} bg={C.greenDim} />
+        <StatChip valor={aprobadosCount}  label="Aprobados"  color={C.green}  bg={C.greenDim} />
         <StatChip valor={`$${totalPagado.toFixed(0)}`} label="Total pagado" color={C.accent} bg={C.accentDim} />
       </View>
 
@@ -176,18 +190,26 @@ export default function AdminRetirosScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {retirosFiltered.length === 0 ? (
+        {retiros.length === 0 && !errorMsg && (
+          <View style={[s.empty, { paddingTop: 40 }]}>
+            <Text style={{ fontSize: 32, marginBottom: 10 }}>📋</Text>
+            <Text style={s.emptyTexto}>No hay solicitudes registradas todavía.</Text>
+            <Text style={[s.emptyTexto, { fontSize: 12, marginTop: 6 }]}>
+              Cuando un usuario solicite un retiro, aparecerá aquí.
+            </Text>
+          </View>
+        )}
+        {retiros.length > 0 && retirosFiltered.length === 0 && (
           <View style={s.empty}>
             <Text style={s.emptyEmoji}>📭</Text>
             <Text style={s.emptyTexto}>
               No hay solicitudes {filtro === 'pendiente' ? 'pendientes' : filtro === 'aprobado' ? 'aprobadas' : 'rechazadas'}
             </Text>
           </View>
-        ) : (
-          retirosFiltered.map(r => (
-            <AdminRetiroCard key={r.id} retiro={r} onResolver={abrirResolver} />
-          ))
         )}
+        {retirosFiltered.map(r => (
+          <AdminRetiroCard key={r.id} retiro={r} onResolver={abrirResolver} />
+        ))}
       </ScrollView>
 
       {/* MODAL RESOLVER */}
@@ -209,7 +231,7 @@ export default function AdminRetirosScreen() {
             {retiroSel && (
               <>
                 <View style={[s.resumenBox, { borderColor: C.orange + '40', backgroundColor: C.orangeDim }]}>
-                  <Text style={s.resumenNombre}>{retiroSel.usuarios?.nombre}</Text>
+                  <Text style={s.resumenNombre}>{retiroSel.usuarios?.nombre ?? '—'}</Text>
                   <Text style={[s.resumenMonto, { color: C.orange }]}>${retiroSel.monto.toFixed(2)}</Text>
                   <Text style={s.resumenBanco}>
                     {retiroSel.banco} ·{' '}
@@ -265,7 +287,6 @@ export default function AdminRetirosScreen() {
   );
 }
 
-// ─── Sub-componente StatChip ────────────────────────────────────────────────
 function StatChip({ valor, label, color, bg }: { valor: string | number; label: string; color: string; bg: string }) {
   return (
     <View style={[s.statChip, { borderColor: color + '60', backgroundColor: bg }]}>
@@ -283,6 +304,8 @@ const s = StyleSheet.create({
   headerTitulo:   { fontSize: 17, fontWeight: '700', color: C.text },
   badgePendiente: { marginTop: 2, backgroundColor: C.orange + '25', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
   badgeTexto:     { fontSize: 10, fontWeight: '800', color: C.orange },
+  errorBanner:    { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, padding: 12, backgroundColor: 'rgba(255,107,107,0.1)', borderRadius: 10, borderWidth: 1, borderColor: C.red + '40' },
+  errorBannerTexto: { flex: 1, color: C.red, fontSize: 12 },
   statsRow:       { flexDirection: 'row', gap: 10, padding: 16, paddingBottom: 8 },
   statChip:       { flex: 1, borderRadius: 12, borderWidth: 1, padding: 12, alignItems: 'center', gap: 2 },
   statVal:        { fontSize: 18, fontWeight: '800' },
@@ -292,7 +315,7 @@ const s = StyleSheet.create({
   filtroTexto:    { fontSize: 12, fontWeight: '700', color: C.textSub },
   empty:          { alignItems: 'center', paddingVertical: 60 },
   emptyEmoji:     { fontSize: 36, marginBottom: 12 },
-  emptyTexto:     { color: C.textSub, fontSize: 14 },
+  emptyTexto:     { color: C.textSub, fontSize: 14, textAlign: 'center' },
   modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalCard:      { backgroundColor: C.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, borderTopWidth: 1, borderColor: C.cardBorder },
   modalHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
