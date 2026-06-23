@@ -1,7 +1,5 @@
 -- ============================================================
 -- MIGRACIÓN: fix_logica_saldos_retiros
--- Cambia modelo "descontar al solicitar" → "descontar al aprobar"
--- Esto evita descuentos dobles y simplifica la lógica de rollback.
 -- ============================================================
 
 -- PASO 0: Agregar columna de rastreo para idempotencia
@@ -18,16 +16,14 @@ begin
   end if;
 end $$;
 
--- Marcar como saldo_descontado=true todas las solicitudes existentes
--- (creadas antes de este fix con el viejo flujo que descontaba al solicitar)
+-- Marcar todas las solicitudes existentes como saldo_descontado=true
 update public.solicitudes_retiro
 set saldo_descontado = true
 where saldo_descontado = false;
 
--- Devolver saldo de solicitudes RECHAZADAS que tuvieron su saldo descontado
--- (el viejo flujo descontó al solicitar pero al rechazar no siempre devolvía)
-update public.usuarios u
-set saldo = u.saldo + sq.total_rechazado
+-- Devolver saldo de solicitudes RECHAZADAS
+update public.usuarios
+set saldo = saldo + sq.total_rechazado
 from (
   select usuario_id, sum(monto) as total_rechazado
   from public.solicitudes_retiro
@@ -35,19 +31,16 @@ from (
     and saldo_descontado = true
   group by usuario_id
 ) sq
-where u.id = sq.usuario_id
+where public.usuarios.id = sq.usuario_id
   and sq.total_rechazado > 0;
 
--- Marcar esas solicitudes como procesadas para no volver a sumarlas
 update public.solicitudes_retiro
 set saldo_descontado = false
 where estado = 'rechazado';
 
--- Devolver también el saldo de solicitudes PENDIENTES
--- (en el nuevo modelo el saldo no se descuenta al solicitar,
---  así que hay que restaurar lo que se descontó antes del fix)
-update public.usuarios u
-set saldo = u.saldo + sq.total_pendiente
+-- Devolver saldo de solicitudes PENDIENTES
+update public.usuarios
+set saldo = saldo + sq.total_pendiente
 from (
   select usuario_id, sum(monto) as total_pendiente
   from public.solicitudes_retiro
@@ -55,27 +48,22 @@ from (
     and saldo_descontado = true
   group by usuario_id
 ) sq
-where u.id = sq.usuario_id
+where public.usuarios.id = sq.usuario_id
   and sq.total_pendiente > 0;
 
--- Marcar pendientes como saldo_descontado=false
--- (en el nuevo modelo el saldo nunca se descuenta al solicitar)
 update public.solicitudes_retiro
 set saldo_descontado = false
 where estado = 'pendiente';
 
 -- ============================================================
--- PASO 1: Reconstruir vista saldos con modelo correcto
--- disponible  = saldo_total - SUM(pendientes)
--- en_retiro   = SUM(pendientes)
--- saldo_total = saldo real en DB
+-- PASO 1: Vista saldos
 -- ============================================================
 create or replace view public.saldos as
 select
-  u.id                                                                            as usuario_id,
-  u.saldo - coalesce(sum(r.monto) filter (where r.estado = 'pendiente'), 0)      as disponible,
-  coalesce(sum(r.monto) filter (where r.estado = 'pendiente'), 0)                as en_retiro,
-  u.saldo                                                                         as saldo_total
+  u.id                                                                        as usuario_id,
+  u.saldo - coalesce(sum(r.monto) filter (where r.estado = 'pendiente'), 0)  as disponible,
+  coalesce(sum(r.monto) filter (where r.estado = 'pendiente'), 0)            as en_retiro,
+  u.saldo                                                                     as saldo_total
 from public.usuarios u
 left join public.solicitudes_retiro r on r.usuario_id = u.id
 group by u.id, u.saldo;
@@ -83,8 +71,7 @@ group by u.id, u.saldo;
 grant select on public.saldos to authenticated;
 
 -- ============================================================
--- PASO 2: Reescribir solicitar_retiro
--- NO descuenta saldo. Solo verifica disponible y crea la solicitud.
+-- PASO 2: solicitar_retiro — NO descuenta saldo
 -- ============================================================
 create or replace function public.solicitar_retiro(
   p_monto          numeric,
@@ -112,7 +99,6 @@ begin
     raise exception 'Debes proporcionar CLABE o número de tarjeta.';
   end if;
 
-  -- Leer saldo y pendientes con bloqueo para evitar race conditions
   select u.saldo,
          coalesce((
            select sum(r.monto)
@@ -135,7 +121,6 @@ begin
       v_disponible, v_en_retiro;
   end if;
 
-  -- Crear solicitud SIN tocar el saldo
   insert into solicitudes_retiro(
     usuario_id, monto, nombre_titular, banco, clabe, numero_tarjeta, saldo_descontado
   ) values (
@@ -152,9 +137,7 @@ end;
 $$;
 
 -- ============================================================
--- PASO 3: Reescribir resolver_retiro
--- APROBAR → descuenta saldo (único momento)
--- RECHAZAR → no toca saldo (nunca se descontó)
+-- PASO 3: resolver_retiro — descuenta solo al aprobar
 -- ============================================================
 create or replace function public.resolver_retiro(
   p_retiro_id uuid,
@@ -192,7 +175,6 @@ begin
   end if;
 
   if p_aprobar then
-    -- APROBAR: descontar saldo ahora
     update usuarios
     set saldo = saldo - v_retiro.monto
     where id = v_retiro.usuario_id
@@ -217,7 +199,6 @@ begin
     );
 
   else
-    -- RECHAZAR: solo cambiar estado, NO tocar saldo
     update solicitudes_retiro
     set estado      = 'rechazado',
         nota_admin  = p_nota,
