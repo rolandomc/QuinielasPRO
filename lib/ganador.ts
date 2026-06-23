@@ -23,6 +23,51 @@ export interface PosicionQuiniela {
   premio_ganado: number;
 }
 
+/**
+ * Acredita el premio al saldo del usuario e inserta un movimiento de tipo 'premio'.
+ * Usa RPC con SECURITY DEFINER para evitar bloqueos de RLS.
+ * Si el RPC no existe, hace fallback a UPDATE + INSERT directos.
+ */
+async function acreditarPremio(
+  usuarioId: string,
+  monto: number,
+  descripcion: string
+): Promise<void> {
+  const { error: rpcErr } = await supabase.rpc('acreditar_premio', {
+    p_usuario_id: usuarioId,
+    p_monto:      monto,
+    p_descripcion: descripcion,
+  });
+
+  if (!rpcErr) return;
+
+  // Fallback JS si la función RPC aún no está creada en Supabase
+  console.warn('[acreditarPremio] RPC no disponible, usando fallback JS:', rpcErr.message);
+
+  // 1. Leer saldo actual
+  const { data: usuarioData } = await supabase
+    .from('usuarios')
+    .select('saldo')
+    .eq('id', usuarioId)
+    .single();
+
+  const saldoActual = Number(usuarioData?.saldo ?? 0);
+
+  // 2. Actualizar saldo
+  await supabase
+    .from('usuarios')
+    .update({ saldo: saldoActual + monto })
+    .eq('id', usuarioId);
+
+  // 3. Insertar movimiento en historial
+  await supabase.from('movimientos').insert({
+    usuario_id:  usuarioId,
+    tipo:        'premio',
+    monto,
+    descripcion,
+  });
+}
+
 export async function calcularGanador(jornada_id: string): Promise<ResumenGanador | null> {
   const { data: jornada, error: jErr } = await supabase
     .from('jornadas')
@@ -54,14 +99,11 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
   const usuarioIds = [...new Set(quinielas.map(q => q.usuario_id))];
   const { data: perfiles } = await supabase
     .from('usuarios')
-    .select('id, nombre, saldo')
+    .select('id, nombre')
     .in('id', usuarioIds);
+
   const nombrePorId: Record<string, string> = {};
-  const saldoPorId: Record<string, number> = {};
-  (perfiles || []).forEach(p => {
-    nombrePorId[p.id] = p.nombre || p.id;
-    saldoPorId[p.id] = p.saldo ?? 0;
-  });
+  (perfiles || []).forEach(p => { nombrePorId[p.id] = p.nombre || p.id; });
 
   const golesReales = partidos.reduce((acc, p) => {
     return acc + (p.goles_local_real ?? 0) + (p.goles_visitante_real ?? 0);
@@ -83,12 +125,12 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
     const diferencia = Math.abs(golesPronosticados - golesReales);
 
     return {
-      quiniela_id: q.id,
-      usuario_id: q.usuario_id,
-      nombre: nombrePorId[q.usuario_id] ?? 'Jugador',
+      quiniela_id:        q.id,
+      usuario_id:         q.usuario_id,
+      nombre:             nombrePorId[q.usuario_id] ?? 'Jugador',
       aciertos,
       goles_pronosticados: golesPronosticados,
-      diferencia_goles: diferencia,
+      diferencia_goles:   diferencia,
     };
   });
 
@@ -99,64 +141,65 @@ export async function calcularGanador(jornada_id: string): Promise<ResumenGanado
 
   const posicionadas: PosicionQuiniela[] = posiciones.map((p, i) => ({
     ...p,
-    posicion: i + 1,
+    posicion:     i + 1,
     premio_ganado: 0,
   }));
 
-  const porcOrg = jornada.porcentaje_organizador ?? 0;
-  const precioBase = jornada.precio ?? 0;
-  const bolsaTotal = jornada.bolsa_total ?? quinielas.length * precioBase;
-  const bolsaPremio = bolsaTotal * ((100 - porcOrg) / 100);
+  const porcOrg        = jornada.porcentaje_organizador ?? 0;
+  const precioBase     = jornada.precio ?? 0;
+  const bolsaTotal     = jornada.bolsa_total ?? quinielas.length * precioBase;
+  const bolsaPremio    = bolsaTotal * ((100 - porcOrg) / 100);
 
-  const lider = posicionadas[0];
+  const lider    = posicionadas[0];
   const ganadores = posicionadas.filter(
     g => g.aciertos === lider.aciertos && g.diferencia_goles === lider.diferencia_goles
   );
-  const empatePerfecto = ganadores.length > 1;
+  const empatePerfecto   = ganadores.length > 1;
   const premioPorGanador = bolsaPremio / ganadores.length;
 
   ganadores.forEach(g => { g.premio_ganado = premioPorGanador; });
 
-  // Guardar posiciones y premios en quinielas
+  // 1. Guardar posiciones y premios en quinielas
   for (const pos of posicionadas) {
     await supabase
       .from('quinielas')
       .update({
-        aciertos: pos.aciertos,
+        aciertos:            pos.aciertos,
         goles_pronosticados: pos.goles_pronosticados,
-        diferencia_goles: pos.diferencia_goles,
-        posicion: pos.posicion,
-        premio_ganado: pos.premio_ganado,
+        diferencia_goles:    pos.diferencia_goles,
+        posicion:            pos.posicion,
+        premio_ganado:       pos.premio_ganado,
       })
       .eq('id', pos.quiniela_id);
   }
 
-  // Acreditar el premio al saldo de cada ganador
+  // 2. Acreditar saldo + registrar movimiento para cada ganador
   for (const ganador of ganadores) {
-    const saldoActual = saldoPorId[ganador.usuario_id] ?? 0;
-    await supabase
-      .from('usuarios')
-      .update({ saldo: saldoActual + premioPorGanador })
-      .eq('id', ganador.usuario_id);
+    await acreditarPremio(
+      ganador.usuario_id,
+      premioPorGanador,
+      `Premio quiniela: ${jornada.nombre}`
+    );
   }
 
+  // 3. Actualizar jornada con resumen final
   await supabase
     .from('jornadas')
     .update({
-      bolsa_total: bolsaTotal,
-      bolsa_premio: bolsaPremio,
-      ganador_usuario_id: empatePerfecto ? null : ganadores[0].usuario_id,
+      bolsa_total,
+      bolsa_premio:         bolsaPremio,
+      ganador_usuario_id:   empatePerfecto ? null : ganadores[0].usuario_id,
     })
     .eq('id', jornada_id);
 
   return {
-    ganador_usuario_id: empatePerfecto ? null : ganadores[0].usuario_id,
-    ganador_nombre: empatePerfecto ? null : ganadores[0].nombre,
-    bolsa_total: bolsaTotal,
-    bolsa_premio: bolsaPremio,
+    ganador_usuario_id:    empatePerfecto ? null : ganadores[0].usuario_id,
+    ganador_nombre:        empatePerfecto ? null : ganadores[0].nombre,
+    bolsa_total:           bolsaTotal,
+    bolsa_premio:          bolsaPremio,
     porcentaje_organizador: porcOrg,
-    posiciones: posicionadas,
-    empate_perfecto: empatePerfecto,
-    premio_por_ganador: premioPorGanador,
+    posiciones:            posicionadas,
+    empate_perfecto:       empatePerfecto,
+    premio_por_ganador:    premioPorGanador,
   };
 }
