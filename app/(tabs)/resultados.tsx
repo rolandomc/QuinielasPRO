@@ -2,8 +2,9 @@
  * app/(tabs)/resultados.tsx — Clean Architecture
  * Usa NeonCard, ScreenHeader, EmptyState, LoadingScreen de components/ui/
  *
- * FIX: auto-selecciona la jornada con estado 'en_proceso' o 'activa'.
+ * FIX: auto-selecciona la jornada con estado 'cerrada' (en curso) o 'abierta'.
  *      Si no hay ninguna, usa la más reciente.
+ *      Los estados reales del admin son: 'abierta' | 'cerrada' | 'finalizada'
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
@@ -33,16 +34,17 @@ type Jornada = {
 type Quiniela = { id: string; estado_pago: string; aciertos: number | null; jornada_id: string };
 type Posicion = { nombre: string; username: string; aciertos: number; posicion: number };
 
-/** Devuelve la jornada prioritaria:
- *  1. estado = 'en_proceso'
- *  2. estado = 'activa'
+/**
+ * Devuelve la jornada prioritaria según los estados reales del admin:
+ *  1. estado = 'cerrada'    → jornada en curso (partidos jugándose, resultados pendientes)
+ *  2. estado = 'abierta'    → jornada activa donde se pueden hacer predicciones
  *  3. la primera de la lista (más reciente por orden DESC)
  */
 function elegirJornadaInicial(lista: Jornada[]): Jornada | null {
   if (lista.length === 0) return null;
   return (
-    lista.find(j => j.estado === 'en_proceso') ??
-    lista.find(j => j.estado === 'activa') ??
+    lista.find(j => j.estado === 'cerrada') ??
+    lista.find(j => j.estado === 'abierta') ??
     lista[0]
   );
 }
@@ -84,7 +86,7 @@ export default function ResultadosScreen() {
 
   const cargar = useCallback(async () => {
     if (!user) return;
-    // Carga todas las jornadas (sin filtrar por estado) para mostrar historial
+    // Carga todas las jornadas (sin filtrar por estado) para mostrar historial completo
     const { data } = await supabase
       .from('jornadas')
       .select('id,nombre,estado,bolsa_total,porcentaje_organizador')
@@ -92,7 +94,7 @@ export default function ResultadosScreen() {
       .limit(20);
     const lista = data ?? [];
     setJornadas(lista);
-    // FIX: elegir jornada prioritaria (en_proceso > activa > más reciente)
+    // Elegir jornada prioritaria: cerrada (en curso) > abierta > más reciente
     const prioritaria = elegirJornadaInicial(lista);
     setJornadaSel(prioritaria);
     if (prioritaria) await cargarJornada(prioritaria);
@@ -135,6 +137,8 @@ export default function ResultadosScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                   {jornadas.map(j => {
                     const activa = jornadaSel?.id === j.id;
+                    // Punto verde para jornadas 'cerradas' (en curso) o 'abierta' (activas)
+                    const enCurso = j.estado === 'cerrada' || j.estado === 'abierta';
                     return (
                       <TouchableOpacity
                         key={j.id}
@@ -144,7 +148,7 @@ export default function ResultadosScreen() {
                         activeOpacity={0.75}
                       >
                         <Text style={[s.jornadaChipTexto, { color: activa ? C.accent : C.textSub }]} numberOfLines={1}>{j.nombre}</Text>
-                        {j.estado === 'en_proceso' && (
+                        {enCurso && (
                           <View style={[s.estadoDot, { backgroundColor: C.green }]} />
                         )}
                       </TouchableOpacity>
