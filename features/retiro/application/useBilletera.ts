@@ -7,8 +7,12 @@
  *   - Usa retiroRepository (interfaz), NO importa supabase directamente.
  *   - Fusiona useRetiro.ts + el antiguo wrapper useBilletera.ts en un solo archivo.
  *   - No hay Alert de React Native aquí — devuelve `error` para que la UI lo maneje.
+ *
+ * FIX: se agregó useEffect para disparar cargar() al montar el hook.
+ *      Sin este efecto el hook nunca pedía datos iniciales y la billetera
+ *      se quedaba en loading indefinidamente (o mostraba $0.00).
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { retiroRepository } from '../data/retiro.supabase';
 import { useAuth } from '../../../context/AuthContext';
 import type { Saldo, Movimiento, SolicitudRetiro, CrearRetiroParams } from '../../../types';
@@ -58,6 +62,11 @@ export function useBilletera(): UseBilleteraReturn {
       setLoading(false);
     }
   }, [userId]);
+
+  // ── FIX: cargar datos al montar (cuando userId esté disponible) ───────────
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
