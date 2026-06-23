@@ -35,7 +35,13 @@ export function useBilletera(
   const [modalVisible, setModalVisible] = useState(false);
 
   const cargar = useCallback(async () => {
-    if (!userId) return;
+    // Si aún no hay userId, salimos pero bajamos el loading
+    // para no quedarnos en pantalla de carga infinita.
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
       const [s, m, r] = await Promise.all([
         fetchSaldo(userId),
@@ -47,6 +53,9 @@ export function useBilletera(
       setRetiros(r);
     } catch (err) {
       console.error('[useBilletera] cargar:', err);
+    } finally {
+      // ✅ siempre baja el loading, sin importar si hubo error
+      setLoading(false);
     }
   }, [userId]);
 
