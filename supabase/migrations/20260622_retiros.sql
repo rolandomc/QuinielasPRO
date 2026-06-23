@@ -1,9 +1,11 @@
 -- ============================================================
 -- TABLA: solicitudes_retiro
+-- NOTA: La FK es a public.usuarios (no auth.users) para que el
+--       join relacional de Supabase JS funcione correctamente.
 -- ============================================================
 create table if not exists public.solicitudes_retiro (
   id               uuid primary key default gen_random_uuid(),
-  usuario_id       uuid not null references auth.users(id) on delete cascade,
+  usuario_id       uuid not null references public.usuarios(id) on delete cascade,
   monto            numeric(10,2) not null check (monto > 0),
   estado           text not null default 'pendiente' check (estado in ('pendiente','aprobado','rechazado')),
   nombre_titular   text not null,
