@@ -12,6 +12,9 @@ import {
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 
+// ✅ URL derivada de variable de entorno — sin hardcoding
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+
 export default function RegistroScreen() {
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
@@ -26,10 +29,7 @@ export default function RegistroScreen() {
     setLoading(true);
 
     try {
-      const urlFuncion =
-        'https://kdvbmvsolrquphfedldz.supabase.co/functions/v1/crear-pago';
-
-      const response = await fetch(urlFuncion, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/crear-pago`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre, telefono }),
@@ -58,14 +58,12 @@ export default function RegistroScreen() {
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Banner superior */}
       <View style={styles.banner}>
         <Text style={styles.bannerEmoji}>⚽</Text>
         <Text style={styles.bannerTitle}>Quiniela Pro</Text>
         <Text style={styles.bannerSub}>¡Predice, juega y gana!</Text>
       </View>
 
-      {/* Card de registro */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Registra tu lugar</Text>
         <Text style={styles.cardSub}>Costo de participación: $100 MXN</Text>
@@ -101,7 +99,6 @@ export default function RegistroScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Acceso directo si ya pagaste */}
       <TouchableOpacity
         style={styles.linkBtn}
         onPress={() => router.replace('/(tabs)/quiniela')}
@@ -122,12 +119,7 @@ const styles = StyleSheet.create({
   },
   banner: { alignItems: 'center', marginBottom: 30 },
   bannerEmoji: { fontSize: 60 },
-  bannerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 8,
-  },
+  bannerTitle: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginTop: 8 },
   bannerSub: { fontSize: 15, color: '#009ee3', marginTop: 4 },
   card: {
     backgroundColor: '#fff',
@@ -137,19 +129,8 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     elevation: 8,
   },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    textAlign: 'center',
-  },
-  cardSub: {
-    fontSize: 13,
-    color: '#888',
-    textAlign: 'center',
-    marginBottom: 20,
-    marginTop: 4,
-  },
+  cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', textAlign: 'center' },
+  cardSub: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 20, marginTop: 4 },
   label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 5 },
   input: {
     borderWidth: 1.5,
@@ -161,13 +142,7 @@ const styles = StyleSheet.create({
     color: '#333',
     backgroundColor: '#fafafa',
   },
-  button: {
-    backgroundColor: '#009ee3',
-    padding: 16,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 4,
-  },
+  button: { backgroundColor: '#009ee3', padding: 16, borderRadius: 10, alignItems: 'center', marginTop: 4 },
   buttonDisabled: { backgroundColor: '#90caf9' },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   linkBtn: { marginTop: 20 },

@@ -12,6 +12,9 @@ import { useFocusEffect } from 'expo-router';
 import NeonWrapper from '../../components/NeonWrapper';
 import { NeonCard, NeonButton, ScreenHeader } from '../../components/ui';
 
+// ✅ URL derivada de variable de entorno — sin hardcoding
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+
 type Partido    = { id:string; local:string; visitante:string; fecha:string; jornada_id:string; cerrado:boolean };
 type Jornada    = { id:string; nombre:string; estado:string; precio?:number|null; porcentaje_organizador?:number|null; bolsa_total?:number|null };
 type QuinielaDB = { id:string; estado_pago:string; jornada_id:string };
@@ -336,8 +339,9 @@ export default function QuinielaScreen() {
       );
       if (qError) throw new Error('Error creando quiniela: '+qError.message);
       const { data:{session} } = await supabase.auth.getSession();
+      // ✅ URL construida desde variable de entorno
       const response = await fetch(
-        'https://kdvbmvsolrquphfedldz.supabase.co/functions/v1/crear-pago',
+        `${SUPABASE_URL}/functions/v1/crear-pago`,
         { method:'POST',
           headers:{'Content-Type':'application/json','Authorization':`Bearer ${session?.access_token}`},
           body:JSON.stringify({nombre:usuario?.nombre||'Jugador',usuario_id:user.id,jornada_id:jornada.id,jornada_nombre:jornada.nombre}) }
@@ -379,7 +383,6 @@ export default function QuinielaScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* HEADER — ahora con ScreenHeader compartido */}
         <ScreenHeader title="⚽ Mi Quiniela">
           {jornada?.precio!=null&&jornada.precio>0&&(
             <NeonWrapper color={C.goldGlow} borderRadius={14} shadowRadius={10} opacity={1} style={{ marginTop: 10 }}>
