@@ -1,9 +1,10 @@
-// ARCHIVO ELIMINADO — toda la lógica vive en:
-// features/retiro/retiroService.ts  → queries Supabase
-// features/retiro/retiroUtils.ts    → helpers de presentación
-// features/retiro/useRetiro.ts      → hook para billetera de usuario
-// features/retiro/useAdminRetiros.ts → hook para panel admin
-// types/index.ts                    → tipos compartidos
+// ⛔ ARCHIVO DEPRECADO — eliminado en Fase 2
+// Toda la lógica de retiros vive en:
+//   features/retiro/retiroService.ts      → queries Supabase
+//   features/retiro/retiroUtils.ts        → helpers de presentación
+//   features/retiro/application/useBilletera.ts  → hook usuario
+//   features/retiro/useAdminRetiros.ts    → hook panel admin
+//   types/index.ts                        → tipos compartidos
 //
-// Este archivo puede borrarse del repositorio de forma segura.
+// TODO: borrar este archivo cuando se confirme que ningún import lo referencia.
 export {};

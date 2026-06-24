@@ -1,7 +1,8 @@
-// ARCHIVO ELIMINADO — toda la lógica vive en:
-// constants/colors.ts               → paleta COLORS centralizada
-// features/retiro/retiroUtils.ts    → estadoColor, estadoLabel, formatFecha
-// features/retiro/useAdminRetiros.ts → lógica de estado del panel admin
+// ⛔ ARCHIVO DEPRECADO — eliminado en Fase 2
+// Helpers de admin ahora en:
+//   constants/colors.ts                   → paleta COLORS centralizada
+//   features/retiro/retiroUtils.ts        → estadoColor, estadoLabel, formatFecha
+//   features/retiro/useAdminRetiros.ts    → lógica estado panel admin
 //
-// Este archivo puede borrarse del repositorio de forma segura.
+// TODO: borrar este archivo cuando se confirme que ningún import lo referencia.
 export {};
